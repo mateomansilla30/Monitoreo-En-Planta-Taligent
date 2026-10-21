@@ -1,0 +1,24 @@
+# Secretos
+.env
+.env.*
+!.env.example
+
+# Entorno virtual
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Salidas generadas por las corridas
+salidas/
+*.db
+*.log
+
+# Editor / SO
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
