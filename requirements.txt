@@ -1,0 +1,4 @@
+pyyaml
+fastmcp
+anthropic
+python-dotenv
