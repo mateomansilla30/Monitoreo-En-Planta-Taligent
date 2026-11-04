@@ -20,8 +20,13 @@ def procesar_snapshot(snapshot_id: str) -> dict:
     En 'cambios' viene lo que cambió en el cuaderno con esta foto: casos 'abierto', 'escalado'
     o 'resuelto'. Un 'escalado' significa que en esta foto hay que mandar una alerta.
     Si la foto ya se había procesado, 'ya_procesada' es true y 'cambios' viene vacío.
-    Si 'ultima_foto_del_turno' es true, en esta foto toca armar el informe del turno, y además
-    viene 'casos_activos': todos los casos del cuaderno que no están resueltos."""
+    Si 'ultima_foto_del_turno' es true, en esta foto toca armar el informe del turno, y además vienen:
+    - 'novedades': los casos que cambiaron desde el informe anterior (nuevos, escalados, resueltos,
+      que cambiaron de severidad, o que tuvieron en el turno una severidad más alta que la del cierre).
+      'en_el_informe_anterior' dice cómo estaban en el informe anterior (null si es un caso nuevo).
+      Si la lista viene vacía, el turno no tuvo novedades: no repitas lo que ya se informó.
+    - 'casos_activos': todos los casos que no están resueltos.
+    Cada caso trae 'severidad_actual' (la del cierre) y 'severidad_maxima' (la más alta del turno)."""
     
     if not re.fullmatch(r"S\d{3}", snapshot_id) or not (calculo.DATA / "snapshots" / f"{snapshot_id}.json").exists():
         raise ToolError(f"La foto '{snapshot_id}' no existe. Los nombres válidos van de 'S001' a 'S060'.")
@@ -33,7 +38,6 @@ def procesar_snapshot(snapshot_id: str) -> dict:
     cuaderno = registro.cargar()
     ya_procesada = snapshot_id in cuaderno["snapshots_procesados"]
     cambios = registro.procesar_snapshot(cuaderno, snapshot_id, problemas)
-    registro.guardar(cuaderno)
     respuesta = {
         "snapshot_id": snapshot_id,
         "hora": snapshot["timestamp"],
@@ -43,8 +47,9 @@ def procesar_snapshot(snapshot_id: str) -> dict:
         "problemas": problemas,
         "cambios": cambios,
     }
-    if cierre:
-        respuesta["casos_activos"] = [c for c in cuaderno["casos"] if c["estado"] != "resuelto"]
+    if cierre and not ya_procesada:  # un cierre repetido no arma otro informe
+        respuesta["novedades"], respuesta["casos_activos"] = registro.cerrar_turno(cuaderno)
+    registro.guardar(cuaderno)
     return respuesta
 
 

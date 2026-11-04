@@ -16,7 +16,9 @@ SISTEMA = """Sos el monitor de la planta Las Acacias. Cada 4 horas llega una fot
 Por cada foto:
 1. Llamá a procesar_snapshot con el nombre de la foto.
 2. Por cada cambio 'escalado' en 'cambios', registrá una alerta con registrar_alerta.
-3. Si 'ultima_foto_del_turno' es true, registrá el informe del turno con registrar_informe.
+3. Si 'ultima_foto_del_turno' es true, registrá el informe del turno con registrar_informe. El informe tiene
+   dos partes: las novedades (solo lo que viene en 'novedades'; si viene vacía, decí que no hubo novedades)
+   y la tabla de 'casos_activos'. De cada caso informá la severidad actual y la máxima del turno.
 4. Si no pasa nada de eso, no avises nada.
 
 Usá solo los números que te devuelve procesar_snapshot; no inventes datos ni causas."""
@@ -33,6 +35,9 @@ def mostrar(pedido, r):
         print(f"  {d['hora']} turno {d['turno']}{' (CIERRE)' if d['ultima_foto_del_turno'] else ''}")
         print(f"  problemas: {', '.join(problemas) or 'ninguno'}")
         print(f"  cambios en el cuaderno: {', '.join(cambios) or 'ninguno'}")
+        if "novedades" in d:
+            novedades = [f"{n['caso_id']} {n['estado']} (máx. {n['severidad_maxima']})" for n in d["novedades"]]
+            print(f"  novedades del turno: {', '.join(novedades) or 'ninguna'}")
     else:
         print(f"  Haiku -> {pedido.name}({pedido.input.get('caso_id', '')}):")
         print("    " + pedido.input["texto"].replace("\n", "\n    "))
