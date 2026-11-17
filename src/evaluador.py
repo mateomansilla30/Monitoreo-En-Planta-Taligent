@@ -49,7 +49,7 @@ def evaluar(hasta):
     print(f"  Fotos procesadas: {len(fotos) - len(faltan_fotos)} de {len(fotos)}")
     print(f"  Alertas:  {len(alertas_ok & set(alertas))} de {len(alertas_ok)} bien")
     print(f"  Informes: {len(informes_ok & set(informes))} de {len(informes_ok)} bien")
-    print("\n".join(f"  ❌ {e}" for e in errores) or "  ✅ sin errores")
+    print("\n".join(f" {e}" for e in errores) or "   sin errores")
     return errores
 
 
