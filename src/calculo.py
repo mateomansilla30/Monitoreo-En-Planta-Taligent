@@ -25,6 +25,7 @@ def leer_plan():
             plan[clave] = int(fila["unidades_plan"])
     return plan
 
+
 def leer_turnos():
     """Devuelve la lista de turnos en orden (T01, T02, ...)"""
     with open(DATA / "planta" / "turnos.csv", encoding="utf-8-sig") as f:
@@ -53,7 +54,8 @@ def leer_snapshot(snapshot_id):
 def avance_real(snapshot_id):
     """Devuelve {(modelo, mercado): unidades} liberadas desde S001 hasta este snapshot.
     Una unidad que aparece dos veces se cuenta una."""
-    # ponytail: relee S001..snapshot_id en cada llamada (60 JSON, O(n²) en la serie); llevar el set incremental si pesa
+    # Simplificación: relee S001..snapshot_id en cada llamada (crece al cuadrado con la serie, pero son 60 JSON chicos).
+    # Si llega a pesar, llevar el conjunto de unidades liberadas de una foto a la siguiente.
     unidades = {}
     for i in range(1, int(snapshot_id[1:]) + 1):
         for u in leer_snapshot(f"S{i:03}")["liberadas"]:
@@ -179,7 +181,7 @@ def etapa_cuello(snapshot, tiempos, umbrales):
     for u in snapshot["unidades"]:
         if u["etapa"] in ETAPAS and demorada(u, ahora, tiempos, umbrales):
             demoradas.setdefault((u["modelo"], u["mercado"]), Counter())[u["etapa"]] += 1
-    # ponytail: en un empate gana la etapa más temprana del proceso; criterio.md no dice cuál
+    # criterio.md no dice qué pasa en un empate: gana la etapa que viene primero en el proceso
     return {clave: max(ETAPAS, key=c.__getitem__) for clave, c in demoradas.items()}
 
 
@@ -212,58 +214,13 @@ def evaluar(snapshot_id):
 
 
 if __name__ == "__main__":
-    plan = leer_plan()
-    turnos = leer_turnos()
-    print("S013:", plan_acumulado("S013", "SUV", "Europa", plan, turnos))
-    print("S014:", plan_acumulado("S014", "SUV", "Europa", plan, turnos))
-
-    avance = avance_real("S002")
-    assert sum(avance.values()) == len({u["unidad_id"] for s in ("S001", "S002") for u in leer_snapshot(s)["liberadas"]})
-    for (modelo, mercado), real in sorted(avance.items()):
-        print(f"S002 {modelo}/{mercado}: real {real}, plan {plan_acumulado('S002', modelo, mercado, plan, turnos)}")
-
-    umbrales = leer_umbrales()
-    assert severidad_gap(-2, -16.7, umbrales) == "ninguna"  # bajo el mínimo de unidades
-    assert severidad_gap(-3, -9.9, umbrales) == "ninguna"
-    assert severidad_gap(-3, -10, umbrales) == "media"
-    assert severidad_gap(-3, -25, umbrales) == "alta"
-    assert severidad_gap(-5, -41.7, umbrales) == "critica"
-    assert severidad_gap(4, 33, umbrales) == "ninguna"  # adelantado
-
-    for s in ("S034", "S042"):
-        avance = avance_real(s)
-        for modelo, mercado in sorted(avance):
-            u, pct = gap(s, modelo, mercado, plan, turnos, avance)
-            if u < 0:
-                print(f"{s} {modelo}/{mercado}: gap {u} ({pct:.1f}%) -> {severidad_gap(u, pct, umbrales)}")
-
-    tiempos = leer_tiempos()
-    embarques = leer_embarques()
-    # El ejemplo hecho a mano: U02472 en S034 entra a patio 8/3 01:00 y llega a BRA-0308
-    s034 = leer_snapshot("S034")
-    u02472 = next(u for u in s034["unidades"] if u["unidad_id"] == "U02472")
-    ahora = datetime.fromisoformat(s034["timestamp"])
-    assert llegada_a_patio(u02472, ahora, tiempos) == datetime(2026, 3, 8, 1, 0)
-    assert retraso_unidad(u02472, ahora, tiempos, embarques) == 0
-    # Repintado: pintura con retrabajos usa 360 en vez de 480
-    repintado = dict(u02472, etapa="pintura", retrabajos=1, ingreso_etapa="2026-03-07T22:00")
-    assert llegada_a_patio(repintado, ahora, tiempos) == ahora + timedelta(minutes=360 + 540 + 180)
-    assert severidad_retraso(1, "Local", umbrales) == "media"
-    assert severidad_retraso(1, "Brasil", umbrales) == "alta"
-    assert severidad_retraso(7, "Europa", umbrales) == "critica"
-    assert severidad_retraso(0, "Europa", umbrales) == "ninguna"
-
-    assert severidad_minima("media", "ninguna") == "media"
-    assert severidad_minima("ninguna", "critica") == "critica"
-    assert severidad_minima("alta", "media") == "alta"
-    # U02472 lleva 15h36 en montaje (estándar 9h + 1h de tolerancia): demorada
-    assert demorada(u02472, ahora, tiempos, umbrales)
-    assert demorada(repintado, ahora, tiempos, umbrales)  # recién entró, pero está en repintado
-    assert not demorada(dict(u02472, ingreso_etapa="2026-03-07T13:00"), ahora, tiempos, umbrales)  # 9h justas
-
-    for i in range(1, 43):  # días 1 a 7; los días 8 a 10 (S043-S060) quedan apartados hasta la semana 5
-        for c in evaluar(f"S{i:03}"):
+    # python src/calculo.py S036 → los desvíos de esa foto; sin nada → los de S001 a S042, sin usar el modelo
+    # (los días 8 a 10, S043–S060, quedan apartados hasta la Semana 5)
+    import sys
+    fotos = [sys.argv[1]] if len(sys.argv) > 1 else [f"S{i:03}" for i in range(1, 43)]
+    for s in fotos:
+        for c in evaluar(s):
             if c["severidad_final"] != "ninguna":
-                print(f"S{i:03} {c['modelo']}/{c['mercado']}: faltan {c['autos_faltantes']:g} ({c['autos_faltantes_pct']}%) {c['severidad_por_faltantes']}"
+                print(f"{s} {c['modelo']}/{c['mercado']}: faltan {c['autos_faltantes']:g} ({c['autos_faltantes_pct']}%) {c['severidad_por_faltantes']}"
                       f" | {c['autos_que_pierden_embarque']} pierden embarque, {c['dias_de_retraso']:g}d {c['severidad_por_embarque']}"
                       f" | => {c['severidad_final']} | se traban en {c['etapa_donde_se_traban']}")

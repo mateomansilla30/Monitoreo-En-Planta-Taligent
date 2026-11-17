@@ -28,7 +28,20 @@ python src/evaluador.py S016
 
 El agente imprime foto por foto qué encontró, qué cambió en el cuaderno y qué escribió Haiku, y al final el tiempo, los tokens y el costo. El cuaderno queda en `salidas/registro.json`.
 
+Para ver solo las cuentas, sin el modelo: `python src/calculo.py S036` muestra los desvíos de esa foto.
+
 En Windows, si los acentos salen mal: `$env:PYTHONIOENCODING="utf-8"` (PowerShell) o `set PYTHONIOENCODING=utf-8` (cmd).
+
+## Pruebas
+
+Están en `tests/`, una por archivo de `src/`. No usan la API ni tocan `salidas/registro.json`, y cada una imprime `ok` si pasa:
+
+```
+python tests/test_calculo.py      # las cuentas, con ejemplos verificados a mano
+python tests/test_registro.py     # el ciclo de un caso y las novedades del informe
+python tests/test_servidor.py     # las tools: lo que devuelven y lo que rechazan
+python tests/test_evaluador.py    # que el evaluador encuentre los errores de un agente
+```
 
 ## Cómo está armado
 
@@ -51,6 +64,8 @@ evaluador.py → compara lo que avisó Haiku con lo que tendría que haber avisa
 | `src/servidor_mcp.py` | Servidor MCP (FastMCP, stdio) con 3 tools. |
 | `src/agente.py` | El loop con Haiku: recorre las llegadas de `llegadas.csv` en orden. |
 | `src/evaluador.py` | Le pone nota a una corrida. |
+| `tests/` | Las pruebas de cada archivo. |
+| `docs/M1.md` | Explicación de las cuentas, con ejemplos. |
 
 ### Las tools
 

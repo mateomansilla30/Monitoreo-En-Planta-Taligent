@@ -8,6 +8,7 @@ import registro
 
 mcp = FastMCP("Monitoreo planta")
 
+
 @mcp.tool()
 def procesar_snapshot(snapshot_id: str) -> dict:
     """Procesa una foto nueva de la planta: calcula los problemas y los anota en el cuaderno de casos.
@@ -27,7 +28,6 @@ def procesar_snapshot(snapshot_id: str) -> dict:
       Si la lista viene vacía, el turno no tuvo novedades: no repitas lo que ya se informó.
     - 'casos_activos': todos los casos que no están resueltos.
     Cada caso trae 'severidad_actual' (la del cierre) y 'severidad_maxima' (la más alta del turno)."""
-    
     if not re.fullmatch(r"S\d{3}", snapshot_id) or not (calculo.DATA / "snapshots" / f"{snapshot_id}.json").exists():
         raise ToolError(f"La foto '{snapshot_id}' no existe. Los nombres válidos van de 'S001' a 'S060'.")
     turnos = calculo.leer_turnos()

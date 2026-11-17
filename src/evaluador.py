@@ -7,7 +7,7 @@ import registro
 
 def esperado(hasta):
     """Lo que haría un agente perfecto de S001 a 'hasta', calculado sin Haiku y con un cuaderno propio en memoria."""
-    cuaderno = {"snapshots_procesados": [], "casos": [], "alertas": [], "informes": []}
+    cuaderno = registro.nuevo()
     cierres = {t["snapshot_cierre"] for t in calculo.leer_turnos()}
     fotos = [f"S{i:03}" for i in range(1, hasta + 1)]
     alertas, informes = set(), set()
@@ -49,7 +49,7 @@ def evaluar(hasta):
     print(f"  Fotos procesadas: {len(fotos) - len(faltan_fotos)} de {len(fotos)}")
     print(f"  Alertas:  {len(alertas_ok & set(alertas))} de {len(alertas_ok)} bien")
     print(f"  Informes: {len(informes_ok & set(informes))} de {len(informes_ok)} bien")
-    print("\n".join(f" {e}" for e in errores) or "   sin errores")
+    print("\n".join(f"  ERROR: {e}" for e in errores) or "  Sin errores")
     return errores
 
 

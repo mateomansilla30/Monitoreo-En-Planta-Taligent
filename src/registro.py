@@ -3,20 +3,25 @@ from pathlib import Path
 
 from calculo import SEVERIDADES
 
-RUTA = Path(__file__).resolve().parent.parent / "salidas" / "registro.json"
+RUTA = Path(__file__).resolve().parent.parent / "salidas" / "registro.json"  # las pruebas la cambian por una temporal
 
 
-def cargar(ruta=RUTA):
+def nuevo():
+    """Un cuaderno vacío."""
+    return {"snapshots_procesados": [], "casos": [], "alertas": [], "informes": []}
+
+
+def cargar():
     """Lee el cuaderno. Si todavía no existe, devuelve uno vacío."""
-    if not ruta.exists():
-        return {"snapshots_procesados": [], "casos": [], "alertas": [], "informes": []}
-    with open(ruta, encoding="utf-8") as f:
+    if not RUTA.exists():
+        return nuevo()
+    with open(RUTA, encoding="utf-8") as f:
         return json.load(f)
 
 
-def guardar(registro, ruta=RUTA):
-    ruta.parent.mkdir(exist_ok=True)
-    with open(ruta, "w", encoding="utf-8") as f:
+def guardar(registro):
+    RUTA.parent.mkdir(exist_ok=True)
+    with open(RUTA, "w", encoding="utf-8") as f:
         json.dump(registro, f, ensure_ascii=False, indent=2)
 
 
@@ -86,34 +91,3 @@ def cerrar_turno(registro):
         caso["ultimo_informe"] = ahora
         caso["severidad_maxima"] = "ninguna"  # la máxima del próximo informe arranca de cero
     return novedades, activos
-
-
-if __name__ == "__main__":
-    r = {"snapshots_procesados": [], "casos": []}
-    suv = lambda sev: [{"modelo": "SUV", "mercado": "Europa", "severidad_final": sev}]
-    assert procesar_snapshot(r, "S015", suv("media")) == [{"caso_id": "C001", "cambio": "abierto"}]
-    assert procesar_snapshot(r, "S016", suv("critica")) == [{"caso_id": "C001", "cambio": "escalado"}]
-    assert procesar_snapshot(r, "S017", suv("critica")) == []  # ya escalado: no vuelve a alertar
-    assert procesar_snapshot(r, "S019", []) == []              # 1 foto sin problema
-    assert procesar_snapshot(r, "S019", []) == []              # foto repetida: no cuenta
-    assert procesar_snapshot(r, "S020", []) == [{"caso_id": "C001", "cambio": "resuelto"}]
-    assert r["casos"][0]["resuelto_en"] == "S020"
-    assert procesar_snapshot(r, "S021", suv("media")) == [{"caso_id": "C002", "cambio": "abierto"}]
-
-    # novedades del informe: turno T08 = S015 + S016, T09 = S017 + S018, T10 = S019 + S020
-    r = {"snapshots_procesados": [], "casos": []}
-    novedades = lambda: [(n["caso_id"], n["estado"], n["severidad_maxima"]) for n in cerrar_turno(r)[0]]
-    procesar_snapshot(r, "S015", suv("media")); procesar_snapshot(r, "S016", suv("critica"))
-    assert novedades() == [("C001", "escalado", "critica")]          # caso nuevo
-    procesar_snapshot(r, "S017", suv("critica")); procesar_snapshot(r, "S018", suv("critica"))
-    assert novedades() == []                                          # nada cambió: no se repite
-    procesar_snapshot(r, "S019", []); procesar_snapshot(r, "S020", [])
-    assert novedades() == [("C001", "resuelto", "ninguna")]          # resuelto en el turno
-    assert novedades() == []                                          # un resuelto no vuelve a aparecer
-    loc = lambda sev: [{"modelo": "SUV", "mercado": "Local", "severidad_final": sev}]
-    procesar_snapshot(r, "S021", loc("media")); procesar_snapshot(r, "S022", loc("media"))
-    assert novedades() == [("C002", "en_seguimiento", "media")]      # caso nuevo
-    procesar_snapshot(r, "S023", loc("alta")); procesar_snapshot(r, "S024", loc("media"))
-    assert novedades() == [("C002", "en_seguimiento", "alta")]       # pico alta que bajó a media
-    assert cerrar_turno(r)[1][0]["caso_id"] == "C002"                 # casos activos
-    print("ok")
