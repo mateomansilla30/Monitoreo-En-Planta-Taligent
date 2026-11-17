@@ -22,13 +22,22 @@ SISTEMA = """Sos el monitor de la planta Las Acacias. Cada 4 horas llega una fot
 Por cada foto:
 1. Llamá a procesar_snapshot con el nombre de la foto. Si 'ya_procesada' es true, la foto llegó repetida:
    no avises nada.
-2. Por cada cambio 'escalado' en 'cambios', registrá una alerta con registrar_alerta.
-3. Si 'ultima_foto_del_turno' es true, registrá el informe del turno con registrar_informe. El informe tiene
+2. Si 'buscar_causa' trae casos, buscales la causa antes de avisar nada. Para cada caso, leé con
+   leer_bitacora las bitácoras que indica y registrá la causa con registrar_causa:
+   - La causa tiene que hablar de ese caso: su modelo, su mercado o la etapa donde se traban los autos.
+     Una bitácora cuenta muchas cosas (seguridad, personal, otros modelos); lo que no es de este caso no sirve.
+   - El fragmento es la frase que nombra la causa, copiada tal cual de la bitácora.
+   - Si ninguna de esas bitácoras dice por qué, registrá 'no_declarada', con la etapa donde se traban
+     los autos según los datos. No completes con una suposición.
+3. Por cada cambio 'escalado' en 'cambios', registrá una alerta con registrar_alerta.
+4. Si 'ultima_foto_del_turno' es true, registrá el informe del turno con registrar_informe. El informe tiene
    dos partes: las novedades (solo lo que viene en 'novedades'; si viene vacía, decí que no hubo novedades)
    y la tabla de 'casos_activos'. De cada caso informá la severidad actual y la máxima del turno.
-4. Si no pasa nada de eso, no avises nada.
+5. Si no pasa nada de eso, no avises nada.
 
-Usá solo los números que te devuelve procesar_snapshot; no inventes datos ni causas."""
+En alertas e informes, poné la causa de cada caso con la bitácora y la frase citada, o decí que la causa
+no está declarada en las bitácoras.
+Usá solo los números que te devuelve procesar_snapshot y las causas que registraste; no inventes nada."""
 
 
 def mostrar(pedido, r):
@@ -48,6 +57,15 @@ def mostrar(pedido, r):
         if "novedades" in d:
             novedades = [f"{n['caso_id']} {n['estado']} (máx. {n['severidad_maxima']})" for n in d["novedades"]]
             print(f"  novedades del turno: {', '.join(novedades) or 'ninguna'}")
+        if d["buscar_causa"]:
+            pedidos = [f"{b['caso_id']} en {', '.join(b['bitacoras']) or 'ninguna escrita todavía'}" for b in d["buscar_causa"]]
+            print(f"  buscar causa: {'; '.join(pedidos)}")
+    elif pedido.name == "leer_bitacora":
+        print(f"  Haiku lee la bitácora {pedido.input['turno_id']}")
+    elif pedido.name == "registrar_causa":
+        c = pedido.input
+        cita = f", {c['bitacora']}: \"{c['fragmento']}\"" if c.get("fragmento") else ""
+        print(f"  Haiku -> causa de {c['caso_id']}: {c['categoria']} ({c['etapa']}){cita}")
     else:
         print(f"  Haiku -> {pedido.name}({pedido.input.get('caso_id', '')}):")
         print("    " + pedido.input["texto"].replace("\n", "\n    "))

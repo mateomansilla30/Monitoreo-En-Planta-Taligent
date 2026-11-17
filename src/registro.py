@@ -48,7 +48,8 @@ def procesar_snapshot(registro, snapshot_id, problemas):
             caso = {"caso_id": f"C{len(registro['casos']) + 1:03}",
                     "modelo": p["modelo"], "mercado": p["mercado"],
                     "estado": "abierto", "abierto_en": snapshot_id,
-                    "alerta_enviada_en": None}
+                    "alerta_enviada_en": None,
+                    "causa": None}  # la registra el agente desde la bitácora (registrar_causa)
             registro["casos"].append(caso)
             cambios.append({"caso_id": caso["caso_id"], "cambio": "abierto"})
         elif caso["estado"] == "abierto":
@@ -82,7 +83,7 @@ def cerrar_turno(registro):
         # para comparar, 'abierto' y 'en_seguimiento' cuentan como el mismo estado
         ahora = {"estado": caso["estado"].replace("en_seguimiento", "abierto"), "severidad": caso["severidad_actual"]}
         antes = caso.get("ultimo_informe")
-        resumen = {k: caso[k] for k in ("caso_id", "modelo", "mercado", "estado", "severidad_actual", "severidad_maxima")}
+        resumen = {k: caso[k] for k in ("caso_id", "modelo", "mercado", "estado", "severidad_actual", "severidad_maxima", "causa")}
         if caso["estado"] != "resuelto":
             activos.append(resumen)
         # novedad: caso nuevo, cambio de estado o severidad, o un pico en el turno más alto que el cierre
@@ -91,3 +92,7 @@ def cerrar_turno(registro):
         caso["ultimo_informe"] = ahora
         caso["severidad_maxima"] = "ninguna"  # la máxima del próximo informe arranca de cero
     return novedades, activos
+
+
+def buscar_caso(registro, caso_id):
+    return next((c for c in registro["casos"] if c["caso_id"] == caso_id), None)
