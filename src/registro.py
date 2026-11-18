@@ -49,11 +49,14 @@ def procesar_snapshot(registro, snapshot_id, problemas):
                     "modelo": p["modelo"], "mercado": p["mercado"],
                     "estado": "abierto", "abierto_en": snapshot_id,
                     "alerta_enviada_en": None,
+                    "etapa_cuello": None,  # la última etapa donde los datos mostraron autos trabados
                     "causa": None}  # la registra el agente desde la bitácora (registrar_causa)
             registro["casos"].append(caso)
             cambios.append({"caso_id": caso["caso_id"], "cambio": "abierto"})
         elif caso["estado"] == "abierto":
             caso["estado"] = "en_seguimiento"
+        if p.get("etapa_donde_se_traban"):
+            caso["etapa_cuello"] = p["etapa_donde_se_traban"]
         anotar_severidad(caso, p["severidad_final"])
         caso["fotos_seguidas_sin_problema"] = 0
         if p["severidad_final"] == "critica" and caso["estado"] != "escalado":

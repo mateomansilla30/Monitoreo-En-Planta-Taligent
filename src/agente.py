@@ -28,7 +28,8 @@ Por cada foto:
      Una bitácora cuenta muchas cosas (seguridad, personal, otros modelos); lo que no es de este caso no sirve.
    - El fragmento es la frase que nombra la causa, copiada tal cual de la bitácora.
    - Si ninguna de esas bitácoras dice por qué, registrá 'no_declarada', con la etapa donde se traban
-     los autos según los datos. No completes con una suposición.
+     los autos según los datos ('etapa_donde_se_traban'); si los datos no muestran ninguna, sin etapa.
+     No completes con una suposición.
 3. Por cada cambio 'escalado' en 'cambios', registrá una alerta con registrar_alerta.
 4. Si 'ultima_foto_del_turno' es true, registrá el informe del turno con registrar_informe. El informe tiene
    dos partes: las novedades (solo lo que viene en 'novedades'; si viene vacía, decí que no hubo novedades)
@@ -65,7 +66,7 @@ def mostrar(pedido, r):
     elif pedido.name == "registrar_causa":
         c = pedido.input
         cita = f", {c['bitacora']}: \"{c['fragmento']}\"" if c.get("fragmento") else ""
-        print(f"  Haiku -> causa de {c['caso_id']}: {c['categoria']} ({c['etapa']}){cita}")
+        print(f"  Haiku -> causa de {c['caso_id']}: {c['categoria']} ({c.get('etapa') or 'sin etapa'}){cita}")
     else:
         print(f"  Haiku -> {pedido.name}({pedido.input.get('caso_id', '')}):")
         print("    " + pedido.input["texto"].replace("\n", "\n    "))

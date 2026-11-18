@@ -166,7 +166,7 @@ def registrar_causa(
     caso_id: str,
     categoria: Literal["parada_de_linea", "faltante_de_piezas", "retrabajo",
                        "retencion_de_calidad", "ausentismo", "no_declarada"],
-    etapa: Literal["carroceria", "pintura", "montaje", "calidad"],
+    etapa: Literal["carroceria", "pintura", "montaje", "calidad"] | None = None,
     bitacora: str | None = None,
     fragmento: str | None = None,
 ) -> str:
@@ -177,9 +177,10 @@ def registrar_causa(
     - retrabajo: unidades que vuelven a una etapa anterior (por ejemplo, repintado).
     - retencion_de_calidad: calidad o una auditoría retiene unidades terminadas.
     - ausentismo: falta de personal.
-    - no_declarada: ninguna bitácora dice por qué. Va sin bitácora ni fragmento, con la etapa
-      donde se traban los autos según los datos. No completes con una suposición.
-    etapa es la etapa donde pasa la causa.
+    - no_declarada: ninguna bitácora dice por qué. Va sin bitácora ni fragmento, y la etapa es la que
+      muestran los datos ('etapa_donde_se_traban'); si los datos no muestran ninguna, va sin etapa.
+      No completes con una suposición.
+    etapa es la etapa donde pasa la causa; es obligatoria salvo en no_declarada.
     bitacora es el turno de donde sale (por ejemplo 'T07') y fragmento es la frase que nombra la causa,
     copiada tal cual de esa bitácora: si no está en el texto, se rechaza."""
     cuaderno = registro.cargar()
@@ -190,7 +191,14 @@ def registrar_causa(
     if categoria == "no_declarada":
         if bitacora or fragmento:
             raise ToolError("Una causa no declarada no lleva bitácora ni fragmento: es porque ninguna bitácora dice por qué.")
+        # sin bitácora, la única fuente de la etapa son los datos: no se acepta otra
+        cuello = caso.get("etapa_cuello")
+        if etapa != cuello:
+            raise ToolError(f"En una causa no declarada la etapa es la que muestran los datos: "
+                            + (f"'{cuello}'." if cuello else "los datos no muestran ninguna, así que va sin etapa."))
     else:
+        if etapa is None:
+            raise ToolError("Falta la etapa donde pasa la causa.")
         if not bitacora or not fragmento:
             raise ToolError("La causa tiene que venir con la bitácora y el fragmento que la nombra. "
                             "Si ninguna bitácora dice por qué, usá 'no_declarada'.")
@@ -203,7 +211,7 @@ def registrar_causa(
     caso["causa"] = {"categoria": categoria, "etapa": etapa, "bitacora": bitacora, "fragmento": fragmento,
                      "registrada_en": cuaderno["snapshots_procesados"][-1]}
     registro.guardar(cuaderno)
-    return f"Causa guardada para {caso_id}: {categoria}, {etapa}."
+    return f"Causa guardada para {caso_id}: {categoria}, {etapa or 'sin etapa'}."
 
 
 if __name__ == "__main__":

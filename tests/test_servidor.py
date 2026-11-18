@@ -47,6 +47,10 @@ async def probar():
         assert (await causa(categoria="retencion_de_calidad", bitacora="T07", fragmento="la auditoría")).is_error  # muy corta
         assert (await causa(categoria="retencion_de_calidad")).is_error                    # sin cita
         assert (await causa(categoria="no_declarada", bitacora="T07", fragmento=cita)).is_error  # no declarada con cita
+        assert (await llamar("registrar_causa", caso_id="C001", categoria="no_declarada",
+                             etapa="montaje")).is_error  # etapa inventada: los datos muestran calidad
+        assert (await llamar("registrar_causa", caso_id="C001", categoria="retencion_de_calidad",
+                             bitacora="T07", fragmento=cita)).is_error  # causa con cita pero sin etapa
         assert (await causa(categoria="otra_cosa", bitacora="T07", fragmento=cita)).is_error     # categoría que no existe
         assert (await llamar("registrar_causa", caso_id="C999", categoria="no_declarada", etapa="calidad")).is_error
 
@@ -111,7 +115,10 @@ async def probar_no_declarada():
         # S019 es mitad de turno: C001 (no declarado) no se revisa porque no hay bitácora nueva;
         # solo se busca la del caso que se abre, C003 SUV/Brasil
         assert buscar(await procesar("S019")) == {"C003": ["T09", "T08"]}
-        await c.call_tool("registrar_causa", {"caso_id": "C003", "categoria": "no_declarada", "etapa": "pintura"})
+        # en S019 los datos no muestran dónde se traban las SUV para Brasil: la no declarada va sin etapa
+        assert (await c.call_tool("registrar_causa", {"caso_id": "C003", "categoria": "no_declarada", "etapa": "montaje"},
+                                  raise_on_error=False)).is_error
+        await c.call_tool("registrar_causa", {"caso_id": "C003", "categoria": "no_declarada"})
 
         # S020 cierra T10: C003 sigue no declarado y se revisa solo T10; C001 se resolvió y C002 ya tiene causa
         assert buscar(await procesar("S020")) == {"C003": ["T10"]}
