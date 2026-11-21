@@ -1,3 +1,4 @@
+import copy
 import json
 from pathlib import Path
 
@@ -8,7 +9,7 @@ RUTA = Path(__file__).resolve().parent.parent / "salidas" / "registro.json"  # l
 
 def nuevo():
     """Un cuaderno vacío."""
-    return {"snapshots_procesados": [], "casos": [], "alertas": [], "informes": []}
+    return {"snapshots_procesados": [], "casos": [], "alertas": [], "informes": [], "subidas": []}
 
 
 def cargar():
@@ -29,6 +30,14 @@ def anotar_severidad(caso, severidad):
     """Guarda la severidad de esta foto y la más alta desde el último informe (para no perder un pico)."""
     caso["severidad_actual"] = severidad
     caso["severidad_maxima"] = max(caso.get("severidad_maxima", "ninguna"), severidad, key=SEVERIDADES.index)
+
+
+def escalar(caso, snapshot_id, origen, cambios):
+    """origen es 'umbral' (los números llegaron a crítica) o 'agente' (una subida por bitácora)."""
+    caso["estado"] = "escalado"
+    caso["alerta_enviada_en"] = snapshot_id
+    caso["escalado_por"] = origen
+    cambios.append({"caso_id": caso["caso_id"], "cambio": "escalado", "origen": origen})
 
 
 def procesar_snapshot(registro, snapshot_id, problemas):
@@ -57,19 +66,25 @@ def procesar_snapshot(registro, snapshot_id, problemas):
             caso["estado"] = "en_seguimiento"
         if p.get("etapa_donde_se_traban"):
             caso["etapa_cuello"] = p["etapa_donde_se_traban"]
-        anotar_severidad(caso, p["severidad_final"])
+        severidad, origen = p["severidad_final"], "umbral"
+        if severidad != "critica" and subida_vigente(registro, caso):
+            severidad, origen = "critica", "agente"  # la severidad del código es un piso: la subida la lleva a crítica
+        anotar_severidad(caso, severidad)
         caso["fotos_seguidas_sin_problema"] = 0
-        if p["severidad_final"] == "critica" and caso["estado"] != "escalado":
-            caso["estado"] = "escalado"
-            caso["alerta_enviada_en"] = snapshot_id
-            cambios.append({"caso_id": caso["caso_id"], "cambio": "escalado"})
+        if severidad == "critica" and caso["estado"] != "escalado":
+            escalar(caso, snapshot_id, origen, cambios)
 
-    # casos activos que en esta foto ya no tienen problema
+    # casos activos que en esta foto ya no tienen problema por los números
     for caso in activos.values():
-        anotar_severidad(caso, "ninguna")
-        caso["fotos_seguidas_sin_problema"] += 1
         if caso["estado"] == "abierto":
             caso["estado"] = "en_seguimiento"
+        if subida_vigente(registro, caso):
+            # con una subida vigente sigue habiendo desvío: no cuenta para resolverse (criterio.md §3)
+            anotar_severidad(caso, "critica")
+            caso["fotos_seguidas_sin_problema"] = 0
+            continue
+        anotar_severidad(caso, "ninguna")
+        caso["fotos_seguidas_sin_problema"] += 1
         if caso["fotos_seguidas_sin_problema"] == 2:
             caso["estado"] = "resuelto"
             caso["resuelto_en"] = snapshot_id
@@ -78,9 +93,52 @@ def procesar_snapshot(registro, snapshot_id, problemas):
     return cambios
 
 
-def cerrar_turno(registro):
+def subida_vigente(registro, caso):
+    """La subida de severidad vigente que alcanza a este caso, o None (criterio.md §5).
+    Alcanza a los casos del mismo modelo con la misma causa: misma categoría y misma etapa."""
+    causa = caso.get("causa")
+    if not causa or causa["categoria"] == "no_declarada":
+        return None
+    return next((s for s in registro.get("subidas", [])
+                 if s["levantada_en"] is None and s["modelo"] == caso["modelo"]
+                 and (s["categoria"], s["etapa"]) == (causa["categoria"], causa["etapa"])), None)
+
+
+def aplicar_subidas(registro, snapshot_id):
+    """Lleva a crítica los casos activos que alcanza una subida vigente. Devuelve los que escalaron con eso.
+    Se usa en el momento en que se sube la severidad o en que un caso recibe una causa con subida vigente."""
+    cambios = []
+    for caso in registro["casos"]:
+        if caso["estado"] != "resuelto" and subida_vigente(registro, caso):
+            anotar_severidad(caso, "critica")
+            caso["fotos_seguidas_sin_problema"] = 0
+            if caso["estado"] != "escalado":
+                escalar(caso, snapshot_id, "agente", cambios)
+    return cambios
+
+
+def subir(registro, caso, bitacora, fragmento, snapshot_id):
+    """El agente sube a crítica la causa de este caso porque la bitácora dice que sigue sin fecha de resolución.
+    Vale para todos los casos activos con esa causa y para los que se abran mientras siga vigente."""
+    registro.setdefault("subidas", []).append({
+        "modelo": caso["modelo"], "categoria": caso["causa"]["categoria"], "etapa": caso["causa"]["etapa"],
+        "subida_en": snapshot_id, "bitacora": bitacora, "fragmento": fragmento,
+        "levantada_en": None, "bitacora_fin": None, "fragmento_fin": None,
+    })
+    return aplicar_subidas(registro, snapshot_id)
+
+
+def levantar(subida, bitacora, fragmento, snapshot_id):
+    """Una bitácora posterior dice que la causa se resolvió: desde acá rige otra vez la severidad del código."""
+    subida.update(levantada_en=snapshot_id, bitacora_fin=bitacora, fragmento_fin=fragmento)
+
+
+def cerrar_turno(registro, confirmar=True):
     """Arma el informe de cierre (criterio.md §4): las novedades desde el último informe y los casos activos.
-    Deja anotado qué se informó de cada caso, para comparar en el próximo cierre."""
+    Con confirmar=True deja anotado qué se informó de cada caso, para comparar en el próximo cierre;
+    con False solo muestra cómo quedaría (lo que ve el agente antes de escribir el informe)."""
+    if not confirmar:
+        registro = copy.deepcopy(registro)
     novedades, activos = [], []
     for caso in registro["casos"]:
         # para comparar, 'abierto' y 'en_seguimiento' cuentan como el mismo estado

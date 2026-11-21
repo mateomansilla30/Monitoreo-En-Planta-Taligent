@@ -21,7 +21,8 @@ def procesar_snapshot(snapshot_id: str) -> dict:
     ningún problema en esa foto.
     
     En 'cambios' viene lo que cambió en el cuaderno con esta foto: casos 'abierto', 'escalado'
-    o 'resuelto'. Un 'escalado' significa que en esta foto hay que mandar una alerta.
+    o 'resuelto'. Un 'escalado' significa que en esta foto hay que mandar una alerta; su 'origen' dice
+    por qué escaló: 'umbral' (los números llegaron a crítica) o 'agente' (una subida por bitácora vigente).
     Si la foto ya se había procesado, 'ya_procesada' es true y 'cambios' viene vacío.
     Si 'ultima_foto_del_turno' es true, en esta foto toca armar el informe del turno, y además vienen:
     - 'novedades': los casos que cambiaron desde el informe anterior (nuevos, escalados, resueltos,
@@ -33,7 +34,9 @@ def procesar_snapshot(snapshot_id: str) -> dict:
 
     Cada problema trae su 'caso_id' y su 'causa' (null si todavía no tiene).
     En 'buscar_causa' vienen los casos a los que hay que buscarles la causa en esta foto, cada uno con
-    las bitácoras a leer. Si la lista viene vacía, no hay que leer ninguna."""
+    las bitácoras a leer. Si la lista viene vacía, no hay que leer ninguna.
+    En el cierre viene además 'revisar_subidas': los casos activos con causa y la bitácora nueva del turno,
+    para ver si una subida vigente ya se resolvió o si una causa sigue sin fecha de resolución."""
     if not re.fullmatch(r"S\d{3}", snapshot_id) or not (calculo.DATA / "snapshots" / f"{snapshot_id}.json").exists():
         raise ToolError(f"La foto '{snapshot_id}' no existe. Los nombres válidos van de 'S001' a 'S060'.")
     turnos = calculo.leer_turnos()
@@ -59,9 +62,22 @@ def procesar_snapshot(snapshot_id: str) -> dict:
         "buscar_causa": [] if ya_procesada else buscar_causa(cuaderno, cierre),
     }
     if cierre and not ya_procesada:  # un cierre repetido no arma otro informe
-        respuesta["novedades"], respuesta["casos_activos"] = registro.cerrar_turno(cuaderno)
+        # solo se muestran: se confirman en registrar_informe, con lo que haya cambiado en esta foto
+        respuesta["novedades"], respuesta["casos_activos"] = registro.cerrar_turno(cuaderno, confirmar=False)
+        respuesta["revisar_subidas"] = revisar_subidas(cuaderno)
     registro.guardar(cuaderno)
     return respuesta
+
+
+def revisar_subidas(cuaderno):
+    """En un cierre, los casos activos con causa, para leer en la bitácora nueva si una subida vigente
+    se resolvió o si una causa sigue sin fecha de resolución (criterio.md §5)."""
+    bitacora = f"T{ultima_bitacora_escrita(cuaderno):02}"
+    return [{"caso_id": c["caso_id"], "modelo": c["modelo"], "mercado": c["mercado"],
+             "causa": f"{c['causa']['categoria']} ({c['causa']['etapa']})",
+             "subida_vigente": registro.subida_vigente(cuaderno, c) is not None, "bitacora": bitacora}
+            for c in cuaderno["casos"]
+            if c["estado"] != "resuelto" and c["causa"] and c["causa"]["categoria"] != "no_declarada"]
 
 
 def buscar_causa(cuaderno, es_cierre):
@@ -94,8 +110,9 @@ def cuaderno_con_foto(snapshot_id):
 
 @mcp.tool()
 def registrar_alerta(snapshot_id: str, caso_id: str, texto: str) -> str:
-    """Manda una alerta inmediata. Usala cuando procesar_snapshot trae un cambio 'escalado':
-    una alerta por caso, en esa misma foto. Lo que no registres acá, no se avisó.
+    """Manda una alerta inmediata. Usala cuando un caso escala: un cambio 'escalado' de procesar_snapshot,
+    o los casos que registrar_causa o subir_severidad dicen que escalan. Una alerta por caso, en esa misma foto.
+    Lo que no registres acá, no se avisó.
     snapshot_id es la foto en la que avisás, por ejemplo 'S016'. caso_id es el que vino en 'cambios'.
     texto es la alerta completa, con los números que la justifican (autos faltantes, días de retraso, etapa)."""
     cuaderno = cuaderno_con_foto(snapshot_id)
@@ -117,7 +134,11 @@ def registrar_informe(snapshot_id: str, texto: str) -> str:
     if not any(t["snapshot_cierre"] == snapshot_id for t in turnos):
         raise ToolError(f"'{snapshot_id}' no es la última foto de su turno. El informe va solo en el cierre.")
     turno = calculo.turno_de(snapshot_id, turnos)
-    cuaderno["informes"].append({"snapshot_id": snapshot_id, "turno": turno, "texto": texto})
+    # se confirma lo informado acá y no en procesar_snapshot: así cuenta lo que escaló en esta misma foto
+    novedades, activos = registro.cerrar_turno(cuaderno)
+    cuaderno["informes"].append({"snapshot_id": snapshot_id, "turno": turno, "texto": texto,
+                                 "novedades": [n["caso_id"] for n in novedades],
+                                 "casos_activos": [c["caso_id"] for c in activos]})
     registro.guardar(cuaderno)
     return f"Informe guardado ({turno}, {snapshot_id})."
 
@@ -161,6 +182,28 @@ def sin_espacios_de_mas(texto):
     return " ".join(texto.split()).casefold()
 
 
+def verificar_cita(bitacora, fragmento, cuaderno):
+    """Que la bitácora ya se pueda leer y que el fragmento esté, tal cual, en ella."""
+    if not bitacora or not fragmento:
+        raise ToolError("Falta la bitácora y el fragmento que lo justifica.")
+    texto = texto_bitacora(bitacora, cuaderno)
+    if len(sin_espacios_de_mas(fragmento)) < 20:
+        raise ToolError("El fragmento es muy corto para justificarlo: citá la frase completa.")
+    if sin_espacios_de_mas(fragmento) not in sin_espacios_de_mas(texto):
+        raise ToolError(f"Ese fragmento no está en la bitácora {bitacora}. Copiá la frase tal cual aparece.")
+
+
+def avisar_escalados(cambios, cuaderno):
+    escalados = [c["caso_id"] for c in cambios]
+    if not escalados:
+        return ""
+    aviso = f" Escalan a crítica por la subida vigente: {', '.join(escalados)}. Mandá una alerta por cada uno."
+    ultima_foto = cuaderno["snapshots_procesados"][-1]
+    if any(t["snapshot_cierre"] == ultima_foto for t in calculo.leer_turnos()):
+        aviso += " Como esta foto cierra el turno, contalos también como escalados en las novedades del informe."
+    return aviso
+
+
 @mcp.tool()
 def registrar_causa(
     caso_id: str,
@@ -202,16 +245,56 @@ def registrar_causa(
         if not bitacora or not fragmento:
             raise ToolError("La causa tiene que venir con la bitácora y el fragmento que la nombra. "
                             "Si ninguna bitácora dice por qué, usá 'no_declarada'.")
-        texto = texto_bitacora(bitacora, cuaderno)
-        if len(sin_espacios_de_mas(fragmento)) < 20:
-            raise ToolError("El fragmento es muy corto para justificar la causa: citá la frase completa.")
-        if sin_espacios_de_mas(fragmento) not in sin_espacios_de_mas(texto):
-            raise ToolError(f"Ese fragmento no está en la bitácora {bitacora}. Copiá la frase tal cual aparece.")
+        verificar_cita(bitacora, fragmento, cuaderno)
 
+    snapshot_id = cuaderno["snapshots_procesados"][-1]
     caso["causa"] = {"categoria": categoria, "etapa": etapa, "bitacora": bitacora, "fragmento": fragmento,
-                     "registrada_en": cuaderno["snapshots_procesados"][-1]}
+                     "registrada_en": snapshot_id}
+    # si esa causa ya tiene la severidad subida, el caso nuevo también queda alcanzado (criterio.md §5)
+    cambios = registro.aplicar_subidas(cuaderno, snapshot_id)
     registro.guardar(cuaderno)
-    return f"Causa guardada para {caso_id}: {categoria}, {etapa or 'sin etapa'}."
+    return f"Causa guardada para {caso_id}: {categoria}, {etapa or 'sin etapa'}." + avisar_escalados(cambios, cuaderno)
+
+
+@mcp.tool()
+def subir_severidad(caso_id: str, bitacora: str, fragmento: str) -> str:
+    """Sube a crítica la causa de un caso cuando la bitácora dice que la causa SIGUE ACTIVA y NO TIENE FECHA
+    de resolución: una línea parada sin fecha de vuelta, un proveedor sin fecha de entrega.
+    No la subas si la bitácora da una fecha concreta ("vuelve mañana", "llega el jueves") o dice que ya se resolvió.
+    La subida vale para todos los casos activos del mismo modelo con esa causa, y para los que se abran
+    mientras siga vigente. Los casos que no estaban escalados escalan ahora: mandá una alerta por cada uno.
+    El caso ya tiene que tener su causa registrada. fragmento es la frase que dice que no hay fecha,
+    copiada tal cual de la bitácora."""
+    cuaderno = registro.cargar()
+    caso = registro.buscar_caso(cuaderno, caso_id)
+    if caso is None or caso["estado"] == "resuelto":
+        raise ToolError(f"El caso '{caso_id}' no existe o ya está resuelto. Usá un caso activo.")
+    if not caso["causa"] or caso["causa"]["categoria"] == "no_declarada":
+        raise ToolError("Primero registrá la causa del caso con registrar_causa: se sube la severidad de una causa.")
+    if registro.subida_vigente(cuaderno, caso):
+        raise ToolError(f"La causa de {caso_id} ya tiene la severidad subida.")
+    verificar_cita(bitacora, fragmento, cuaderno)
+    cambios = registro.subir(cuaderno, caso, bitacora, fragmento, cuaderno["snapshots_procesados"][-1])
+    registro.guardar(cuaderno)
+    return (f"Severidad subida a crítica para {caso['modelo']} con causa "
+            f"{caso['causa']['categoria']} ({caso['causa']['etapa']}).") + avisar_escalados(cambios, cuaderno)
+
+
+@mcp.tool()
+def levantar_subida(caso_id: str, bitacora: str, fragmento: str) -> str:
+    """Termina una subida de severidad cuando una bitácora posterior dice que la causa se resolvió
+    (por ejemplo, la línea volvió a trabajar). Desde la foto siguiente rige otra vez la severidad que calcula
+    el código, y el caso se puede resolver. El caso sigue escalado hasta que se resuelva.
+    fragmento es la frase que dice que se resolvió, copiada tal cual de la bitácora."""
+    cuaderno = registro.cargar()
+    caso = registro.buscar_caso(cuaderno, caso_id)
+    subida = registro.subida_vigente(cuaderno, caso) if caso else None
+    if subida is None:
+        raise ToolError(f"El caso '{caso_id}' no tiene una severidad subida vigente.")
+    verificar_cita(bitacora, fragmento, cuaderno)
+    registro.levantar(subida, bitacora, fragmento, cuaderno["snapshots_procesados"][-1])
+    registro.guardar(cuaderno)
+    return f"Subida terminada para {subida['modelo']} con causa {subida['categoria']} ({subida['etapa']})."
 
 
 if __name__ == "__main__":

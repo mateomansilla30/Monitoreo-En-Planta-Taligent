@@ -19,11 +19,11 @@ ANTHROPIC_API_KEY=...
 Correr el agente y después el evaluador, con la misma foto final:
 
 ```
-python src/agente.py           # todas las llegadas hasta S042 (días 1 a 7)
+python src/agente.py           # las 61 llegadas, los 10 días (S001 a S060)
 python src/evaluador.py
 
-python src/agente.py S016      # solo hasta S016
-python src/evaluador.py S016
+python src/agente.py S042      # solo hasta S042 (días 1 a 7)
+python src/evaluador.py S042
 ```
 
 El agente imprime foto por foto qué encontró, qué cambió en el cuaderno y qué escribió Haiku, y al final el tiempo, los tokens y el costo. El cuaderno queda en `salidas/registro.json`.
@@ -61,7 +61,7 @@ evaluador.py → compara lo que avisó Haiku con lo que tendría que haber avisa
 |---|---|
 | `src/calculo.py` | Las cuentas de `criterio.md`: gap contra el plan, retraso contra el embarque alcanzable, severidad mínima y etapa cuello. Ver `docs/M1.md`. |
 | `src/registro.py` | El cuaderno de casos: abre, sigue, escala y resuelve casos; salta fotos repetidas; arma las novedades de cada informe. |
-| `src/servidor_mcp.py` | Servidor MCP (FastMCP, stdio) con 3 tools. |
+| `src/servidor_mcp.py` | Servidor MCP (FastMCP, stdio) con 7 tools. |
 | `src/agente.py` | El loop con Haiku: recorre las llegadas de `llegadas.csv` en orden. |
 | `src/evaluador.py` | Le pone nota a una corrida. |
 | `tests/` | Las pruebas de cada archivo. |
@@ -71,7 +71,11 @@ evaluador.py → compara lo que avisó Haiku con lo que tendría que haber avisa
 
 | Tool | Cuándo la usa Haiku | Qué rechaza |
 |---|---|---|
-| `procesar_snapshot(snapshot_id)` | En cada foto. Devuelve los problemas, los cambios en el cuaderno y, en el cierre de turno, las novedades y los casos activos. | Una foto que no existe. |
+| `procesar_snapshot(snapshot_id)` | En cada foto. Devuelve los problemas, los cambios en el cuaderno, a qué casos buscarles causa (`buscar_causa`) y, en el cierre de turno, las novedades, los casos activos y qué revisar de las subidas (`revisar_subidas`). | Una foto que no existe. |
+| `leer_bitacora(turno_id)` | Para buscar la causa de un caso. | Una bitácora que todavía no está escrita: la de un turno se lee desde su foto de cierre. |
+| `registrar_causa(caso_id, categoria, etapa, bitacora, fragmento)` | Cuando encontró la causa, o `no_declarada` si ninguna bitácora la nombra. | Una cita que no está en la bitácora, una bitácora del futuro, una `no_declarada` con cita o con una etapa distinta de la que muestran los datos. |
+| `subir_severidad(caso_id, bitacora, fragmento)` | Cuando la bitácora dice que la causa sigue sin fecha de resolución. | Un caso sin causa, una cita inventada, una causa ya subida. |
+| `levantar_subida(caso_id, bitacora, fragmento)` | Cuando una bitácora posterior dice que la causa se resolvió. | Un caso sin subida vigente, una cita inventada. |
 | `registrar_alerta(snapshot_id, caso_id, texto)` | Cuando un caso se escala. | Una foto no procesada o un caso que no existe. |
 | `registrar_informe(snapshot_id, texto)` | En la última foto del turno. | Una foto no procesada o que no es cierre. |
 
@@ -89,29 +93,44 @@ evaluador.py → compara lo que avisó Haiku con lo que tendría que haber avisa
 
 **Las novedades las arma el código.** En el cierre, `registro.cerrar_turno` compara cada caso con cómo estaba en el informe anterior (con `abierto` y `en_seguimiento` como el mismo estado) y guarda la severidad máxima del turno, para no perder un pico que subió y bajó entre dos cierres. Lo que no cambió no se vuelve a nombrar.
 
-**El evaluador calcula lo esperado por su cuenta.** Recorre las mismas fotos con un cuaderno propio en memoria, sin Haiku, y compara: fotos no procesadas, alertas que faltan, sobran o se repiten, informes que faltan o se repiten. No se compara contra el cuaderno que dejó el agente: si Haiku se salteara una foto, ese cuaderno quedaría mal y el error no se vería. Las alertas se comparan por combinación, no por número de caso.
+**La causa la lee el modelo, pero el código decide qué leer y verifica la cita.** `procesar_snapshot` le dice a Haiku a qué casos buscarles causa y en qué bitácoras: a un caso nuevo, las dos últimas escritas; a uno `no_declarada`, solo la bitácora nueva de cada cierre. Así cada bitácora se lee una vez por caso. La bitácora de un turno recién se puede leer en su foto de cierre: antes el supervisor la está escribiendo, y leerla sería saber el futuro. Una alerta a mitad de turno sale igual, con la causa que se pueda citar hasta ahí. `registrar_causa` rechaza cualquier fragmento que no esté tal cual en la bitácora, así que el modelo no puede inventar una cita, y en una `no_declarada` solo acepta la etapa que muestran los datos.
+
+**La subida de severidad es una decisión del modelo, pero sus efectos los aplica el código.** Haiku decide si la bitácora dice que la causa sigue sin fecha (eso es leer texto) y lo justifica con una cita verificada. Desde ahí el cuaderno lleva el caso a crítica, lo escala con origen `agente`, no lo deja resolverse mientras la subida esté vigente y la aplica a los casos del mismo modelo que reciben la misma causa. La subida termina cuando una bitácora posterior dice que se resolvió.
+
+**Las novedades del informe se confirman al registrarlo.** `procesar_snapshot` le muestra al modelo las novedades del cierre, pero recién `registrar_informe` las anota como informadas. Así cuenta lo que escaló en la misma foto de cierre por una subida.
+
+**El evaluador compara contra un agente perfecto.** `agente_perfecto` recorre las mismas fotos con un cuaderno propio, sin Haiku: las reglas del código más las causas y la subida verificadas a mano leyendo las bitácoras (`CAUSAS_ESPERADAS`, `SUBIDAS_ESPERADAS`). Compara fotos no procesadas, alertas que faltan, sobran o se repiten, informes, causas y subidas. No se compara contra el cuaderno que dejó el agente: si Haiku se salteara una foto, ese cuaderno quedaría mal y el error no se vería. Las alertas se comparan por combinación, no por número de caso.
 
 **Decisiones chicas donde el criterio no dice nada:**
 - Etapa cuello: si dos etapas empatan, gana la que viene primero en el proceso.
 - Los umbrales se leen como "desde": un gap de exactamente 10 % ya es media.
+- Una subida alcanza a los casos del mismo modelo con la misma causa (categoría y etapa): la línea de montaje de Pickup parada afecta a Pickup en los tres mercados.
 
-**Días apartados.** Los días 8 a 10 (S043–S060) no se usan hasta la Semana 5: el agente no los deja correr.
+**Días apartados.** Los días 8 a 10 (S043–S060) quedaron afuera mientras se armaba el agente: todo se ajustó con los días 1 a 7. Sus causas se anotaron a mano en el evaluador antes de correrlos, y se corrieron una sola vez, sin tocar el agente. Así miden si anda con datos que nunca vio.
 
 ## Resultados
 
-Corrida de las 43 llegadas hasta S042 (días 1 a 7, con S034 dos veces):
+Corrida de las 61 llegadas (10 días, S034 llega dos veces), 19/11/2026:
 
-| | |
-|---|---|
-| Casos | 11: los Sedán de los días 2–3 y del día 5, los SUV de los días 3–4 y la caída de Pickup en los tres mercados en los días 6–7 |
-| Alertas | 4: SUV/Europa en S016 (4 autos pierden el buque, 7 días) y Pickup Brasil, Local y Europa en S036 |
-| Informes | 21, uno por turno; 8 sin novedades |
-| S034 repetida | Se procesó una sola vez: la segunda llegada no cambió nada ni generó avisos |
-| Evaluador | 42/42 fotos, 4/4 alertas, 21/21 informes, sin errores |
-| Tiempo y costo | 2,7 min · 241.001 tokens de entrada y 21.406 de salida · USD 0,035 |
+| | Días 1 a 7 (con los que se ajustó) | Días 8 a 10 (nunca vistos) |
+|---|---|---|
+| Fotos | 42 de 42 | 18 de 18 |
+| Alertas | 4 de 4: SUV/Europa en S016; Pickup Brasil y Local en S034 y Europa en S035, por la bitácora T17 ("por ahora no hay fecha confirmada de vuelta"), antes de que los números los volvieran críticos en S036 | 1 de 1: SUV/Local en S058, por los números (faltan neumáticos) |
+| Informes | 21 de 21 | 9 de 9 |
+| Causas | 10 de 11 | 6 de 6 |
+| Subida de severidad | 1 de 1: Pickup desde S034 (T17), levantada en S038 (T19, "la línea de montaje de Pickup volvió a las 10:00") | Ninguna, y era lo correcto: los neumáticos tienen fecha de entrega y la parada de SUV "Quedó reparada" |
+
+- **Total:** 17 casos, 5 alertas, 30 informes (10 sin novedades). La foto repetida S034 se procesó una sola vez.
+- **Tiempo y costo:** 5,4 min · 1.071.374 tokens de entrada y 55.088 de salida · **USD 0,13** por los 10 días.
+- **La causa que falla es C006 SUV/Brasil.** La bitácora T09 habla del repintado de "SUV" sin decir el mercado, y cuando se abre el caso (S019) los datos ya no muestran etapa cuello. Haiku pone `no_declarada`, que es prudente. La tabla a mano dice `retrabajo` porque en S017–S018 había SUV para Brasil en repintado.
+- **Ruido que no cambia nada:**
+  - Haiku a veces procesa una foto dos veces (S024).
+  - Intenta subir o levantar la misma causa en cada Pickup, y la tool lo rechaza porque ya está hecho.
+  - A veces nombra como novedad un caso que no cambió.
+
+Los registros completos de las dos corridas quedan en `salidas/corrida_S042.txt` y `salidas/corrida_S060.txt` (no están en git).
 
 ## Lo que falta
 
-- **Semana 2 (M3):** la causa de cada caso desde la bitácora, con el fragmento citado, y subir la severidad cuando la causa sigue sin fecha de resolución.
-- **Semanas 3 a 5:** varios agentes con uno solo que escribe en el registro, hooks, criterio como prompt MCP, salida estructurada, caché y los días 8 a 10.
+- **Semanas 3 a 5:** varios agentes con uno solo que escribe en el registro, hooks, criterio como prompt MCP, salida estructurada y caché.
 - **Evaluador:** todavía no revisa el texto de los avisos ni mide el ruido (novedades que repiten algo ya informado).

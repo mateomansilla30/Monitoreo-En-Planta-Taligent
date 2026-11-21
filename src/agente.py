@@ -30,11 +30,20 @@ Por cada foto:
    - Si ninguna de esas bitácoras dice por qué, registrá 'no_declarada', con la etapa donde se traban
      los autos según los datos ('etapa_donde_se_traban'); si los datos no muestran ninguna, sin etapa.
      No completes con una suposición.
-3. Por cada cambio 'escalado' en 'cambios', registrá una alerta con registrar_alerta.
-4. Si 'ultima_foto_del_turno' es true, registrá el informe del turno con registrar_informe. El informe tiene
+   - Si la bitácora de donde sacaste la causa dice que la causa sigue activa y no tiene fecha de resolución
+     (una línea parada sin fecha de vuelta, un proveedor sin fecha de entrega), subí la severidad con
+     subir_severidad, citando la frase que lo dice. Si da una fecha concreta o dice que se resolvió, no la subas.
+3. Si 'revisar_subidas' trae casos, leé una vez la bitácora que indica y, para cada caso:
+   - si 'subida_vigente' es true y la bitácora dice que la causa se resolvió, terminala con levantar_subida;
+   - si 'subida_vigente' es false y la bitácora dice que la causa sigue sin fecha de resolución, usá subir_severidad.
+   Si no dice nada de eso, no hagas nada.
+4. Por cada caso que escaló, registrá una alerta con registrar_alerta: los 'escalado' de 'cambios', y los
+   que te informen registrar_causa o subir_severidad. Decí por qué escaló: si el origen es 'umbral', por los
+   números; si es por la subida, por lo que dice la bitácora, con la frase citada.
+5. Si 'ultima_foto_del_turno' es true, registrá el informe del turno con registrar_informe. El informe tiene
    dos partes: las novedades (solo lo que viene en 'novedades'; si viene vacía, decí que no hubo novedades)
    y la tabla de 'casos_activos'. De cada caso informá la severidad actual y la máxima del turno.
-5. Si no pasa nada de eso, no avises nada.
+6. Si no pasa nada de eso, no avises nada.
 
 En alertas e informes, poné la causa de cada caso con la bitácora y la frase citada, o decí que la causa
 no está declarada en las bitácoras.
@@ -51,7 +60,7 @@ def mostrar(pedido, r):
             print("  foto repetida: ya se había procesado, el cuaderno no cambia")
             return
         problemas =[f"{p['modelo']}/{p['mercado']} {p['severidad_final']}" for p in d["problemas"]]
-        cambios = [f"{c['caso_id']} {c['cambio']}" for c in d["cambios"]]
+        cambios = [f"{c['caso_id']} {c['cambio']}" + (f" ({c['origen']})" if "origen" in c else "") for c in d["cambios"]]
         print(f"  {d['hora']} turno {d['turno']}{' (CIERRE)' if d['ultima_foto_del_turno'] else ''}")
         print(f"  problemas: {', '.join(problemas) or 'ninguno'}")
         print(f"  cambios en el cuaderno: {', '.join(cambios) or 'ninguno'}")
@@ -61,12 +70,22 @@ def mostrar(pedido, r):
         if d["buscar_causa"]:
             pedidos = [f"{b['caso_id']} en {', '.join(b['bitacoras']) or 'ninguna escrita todavía'}" for b in d["buscar_causa"]]
             print(f"  buscar causa: {'; '.join(pedidos)}")
+        if d.get("revisar_subidas"):
+            revisar = [f"{s['caso_id']}{' (subida vigente)' if s['subida_vigente'] else ''}" for s in d["revisar_subidas"]]
+            print(f"  revisar en {d['revisar_subidas'][0]['bitacora']}: {', '.join(revisar)}")
     elif pedido.name == "leer_bitacora":
         print(f"  Haiku lee la bitácora {pedido.input['turno_id']}")
     elif pedido.name == "registrar_causa":
         c = pedido.input
         cita = f", {c['bitacora']}: \"{c['fragmento']}\"" if c.get("fragmento") else ""
         print(f"  Haiku -> causa de {c['caso_id']}: {c['categoria']} ({c.get('etapa') or 'sin etapa'}){cita}")
+        if "Escalan" in r.content[0].text:
+            print(f"    {r.content[0].text.split('. ', 1)[1]}")
+    elif pedido.name in ("subir_severidad", "levantar_subida"):
+        c = pedido.input
+        accion = "SUBE la severidad" if pedido.name == "subir_severidad" else "levanta la subida"
+        print(f"  Haiku -> {accion} de {c['caso_id']}, {c['bitacora']}: \"{c['fragmento']}\"")
+        print(f"    {r.content[0].text}")
     else:
         print(f"  Haiku -> {pedido.name}({pedido.input.get('caso_id', '')}):")
         print("    " + pedido.input["texto"].replace("\n", "\n    "))
@@ -95,7 +114,7 @@ async def procesar_foto(claude, mcp, tools, snapshot_id):
         messages.append({"role": "user", "content": resultados})
 
 
-ULTIMA_FOTO = 42  # días 1 a 7; S043–S060 (días 8 a 10) quedan apartados hasta la Semana 5
+ULTIMA_FOTO = 60  # los 10 días; S043–S060 (días 8 a 10) quedaron apartados hasta tener el agente terminado
 
 
 def llegadas(hasta):
@@ -122,6 +141,10 @@ async def correr(hasta=ULTIMA_FOTO):
     print("\nCasos:")
     for c in cuaderno["casos"]:
         print(f"  {c['caso_id']} {c['modelo']}/{c['mercado']}: {c['estado']} (abierto en {c['abierto_en']})")
+    print("\nSeveridad subida por bitácora:")
+    for s in cuaderno.get("subidas", []):
+        hasta = f"hasta {s['levantada_en']} ({s['bitacora_fin']})" if s["levantada_en"] else "sigue vigente"
+        print(f"  {s['modelo']} {s['categoria']} ({s['etapa']}): desde {s['subida_en']} ({s['bitacora']}), {hasta}")
     print("\nAlertas:")
     for a in cuaderno["alertas"]:
         print(f"  [{a['snapshot_id']}] {a['caso_id']}: {a['texto']}")
@@ -136,5 +159,5 @@ async def correr(hasta=ULTIMA_FOTO):
 
 if __name__ == "__main__":
     load_dotenv()
-    # python src/agente.py S016 → corre S001 a S016; sin nada → hasta S042
+    # python src/agente.py S042 → corre S001 a S042; sin nada → las 61 llegadas, hasta S060
     asyncio.run(correr(int(sys.argv[1].lstrip("Ss")) if len(sys.argv) > 1 else ULTIMA_FOTO))

@@ -27,7 +27,29 @@ CAUSAS_ESPERADAS = {
     ("Pickup/Brasil", "S034"): ("parada_de_linea", "montaje", "T17"),
     ("Pickup/Local", "S034"): ("parada_de_linea", "montaje", "T17"),
     ("Pickup/Europa", "S035"): ("parada_de_linea", "montaje", "T17"),
+    # Días 8 a 10, anotados a mano antes de correrlos con Haiku (sin tocar el agente).
+    # T23: "La línea de montaje de SUV estuvo parada de 14:30 a 18:30" (y "Quedó reparada": no se sube)
+    ("SUV/Brasil", "S046"): ("parada_de_linea", "montaje", "T23"),
+    ("SUV/Europa", "S046"): ("parada_de_linea", "montaje", "T23"),
+    ("SUV/Local", "S046"): ("parada_de_linea", "montaje", "T23"),
+    # T28: "faltan neumáticos rodado 18 para la SUV de versión local" (con fecha de entrega: no se sube)
+    ("SUV/Local", "S056"): ("faltante_de_piezas", "montaje", "T28"),
+    # T29: "faltaron nueve operarios en la línea de montaje de Sedán"
+    ("Sedán/Brasil", "S058"): ("ausentismo", "montaje", "T29"),
+    ("Sedán/Local", "S058"): ("ausentismo", "montaje", "T29"),
 }
+
+# Subidas de severidad verificadas a mano (criterio.md §5): la bitácora dice que la causa sigue sin fecha.
+# No se sube: C004 (T08: "El auditor vuelve mañana a primera hora") ni el repintado (T09: "se estiman seis horas").
+SUBIDAS_ESPERADAS = [
+    {"modelo": "Pickup", "categoria": "parada_de_linea", "etapa": "montaje",
+     "bitacora": "T17", "fragmento": "por ahora no hay fecha confirmada de vuelta",
+     "bitacora_fin": "T19", "fragmento_fin": "la línea de montaje de Pickup volvió a las 10:00"},
+]
+
+
+def cierre_de(turno_id):
+    return next(t["snapshot_cierre"] for t in calculo.leer_turnos() if t["turno_id"] == turno_id)
 
 
 def causa_esperada(combinacion, abierto_en, hasta):
@@ -36,37 +58,55 @@ def causa_esperada(combinacion, abierto_en, hasta):
     if (combinacion, abierto_en) not in CAUSAS_ESPERADAS:
         return None
     categoria, etapa, bitacora = CAUSAS_ESPERADAS[(combinacion, abierto_en)]
-    cierre = next(t["snapshot_cierre"] for t in calculo.leer_turnos() if t["turno_id"] == bitacora) if bitacora else None
-    if cierre and int(cierre[1:]) > hasta:
+    if bitacora and int(cierre_de(bitacora)[1:]) > hasta:
         return "no_declarada", etapa
     return categoria, etapa
 
 
-def esperado(hasta):
-    """Lo que haría un agente perfecto de S001 a 'hasta', calculado sin Haiku y con un cuaderno propio en memoria."""
+def agente_perfecto(hasta):
+    """El cuaderno que dejaría un agente perfecto de S001 a 'hasta', sin Haiku: las reglas del código,
+    más las causas y las subidas verificadas a mano. Contra esto se compara lo que hizo Haiku."""
     cuaderno = registro.nuevo()
     cierres = {t["snapshot_cierre"] for t in calculo.leer_turnos()}
-    fotos = [f"S{i:03}" for i in range(1, hasta + 1)]
-    alertas, informes = set(), set()
-    for s in fotos:
+    for i in range(1, hasta + 1):
+        s = f"S{i:03}"
         problemas = [c for c in calculo.evaluar(s) if c["severidad_final"] != "ninguna"]
-        for cambio in registro.procesar_snapshot(cuaderno, s, problemas):
-            if cambio["cambio"] == "escalado":
-                alertas.add((s, combinacion(cuaderno, cambio["caso_id"])))
+        cambios = registro.procesar_snapshot(cuaderno, s, problemas)
+        for caso in cuaderno["casos"]:  # la causa que corresponde, con lo que ya se puede leer
+            esperada = caso["estado"] != "resuelto" and causa_esperada(combinacion(cuaderno, caso["caso_id"]), caso["abierto_en"], i)
+            if esperada:
+                caso["causa"] = {"categoria": esperada[0], "etapa": esperada[1]}
+        cambios += registro.aplicar_subidas(cuaderno, s)
+        for sub in SUBIDAS_ESPERADAS:
+            if s == cierre_de(sub["bitacora"]):
+                caso = next(c for c in cuaderno["casos"] if c["estado"] != "resuelto" and c["modelo"] == sub["modelo"]
+                            and c["causa"] and (c["causa"]["categoria"], c["causa"]["etapa"]) == (sub["categoria"], sub["etapa"]))
+                cambios += registro.subir(cuaderno, caso, sub["bitacora"], sub["fragmento"], s)
+            if s == cierre_de(sub["bitacora_fin"]):
+                vigente = next(v for v in cuaderno["subidas"] if v["modelo"] == sub["modelo"] and v["levantada_en"] is None)
+                registro.levantar(vigente, sub["bitacora_fin"], sub["fragmento_fin"], s)
+        cuaderno["alertas"] += [{"snapshot_id": s, "caso_id": c["caso_id"]} for c in cambios if c["cambio"] == "escalado"]
         if s in cierres:
-            informes.add(s)
-    return fotos, alertas, informes
+            cuaderno["informes"].append({"snapshot_id": s})
+    return cuaderno
 
 
 def combinacion(cuaderno, caso_id):
     # se compara por combinación y no por caso_id: si Haiku se saltea una foto, los números de caso pueden no coincidir
-    caso = next((c for c in cuaderno["casos"] if c["caso_id"] == caso_id), None)
+    caso = registro.buscar_caso(cuaderno, caso_id)
     return f"{caso['modelo']}/{caso['mercado']}" if caso else f"caso inexistente {caso_id}"
 
 
+def subidas(cuaderno):
+    return {(s["modelo"], s["categoria"], s["etapa"], s["subida_en"], s["levantada_en"]) for s in cuaderno.get("subidas", [])}
+
+
 def evaluar(hasta):
-    fotos, alertas_ok, informes_ok = esperado(hasta)
+    perfecto = agente_perfecto(hasta)
     haiku = registro.cargar()
+    fotos = [f"S{i:03}" for i in range(1, hasta + 1)]
+    alertas_ok = {(a["snapshot_id"], combinacion(perfecto, a["caso_id"])) for a in perfecto["alertas"]}
+    informes_ok = {i["snapshot_id"] for i in perfecto["informes"]}
     alertas = Counter((a["snapshot_id"], combinacion(haiku, a["caso_id"])) for a in haiku["alertas"])
     informes = Counter(i["snapshot_id"] for i in haiku["informes"])
     errores = []
@@ -98,15 +138,21 @@ def evaluar(hasta):
         else:
             errores.append(f"{caso['caso_id']} {comb}: esperaba {esperada[0]} ({esperada[1]}), Haiku dijo {dijo[0]} ({dijo[1]})")
 
+    describir = lambda s: f"{s[0]} {s[1]} ({s[2]}), subida en {s[3]}, " + (f"levantada en {s[4]}" if s[4] else "sin levantar")
+    subidas_ok, subidas_haiku = subidas(perfecto), subidas(haiku)
+    errores += [f"faltó la subida de severidad: {describir(s)}" for s in sorted(subidas_ok - subidas_haiku, key=str)]
+    errores += [f"subida de severidad de más: {describir(s)}" for s in sorted(subidas_haiku - subidas_ok, key=str)]
+
     print(f"Evaluación de S001 a S{hasta:03}")
     print(f"  Fotos procesadas: {len(fotos) - len(faltan_fotos)} de {len(fotos)}")
     print(f"  Alertas:  {len(alertas_ok & set(alertas))} de {len(alertas_ok)} bien")
     print(f"  Informes: {len(informes_ok & set(informes))} de {len(informes_ok)} bien")
     print(f"  Causas:   {causas_bien} de {causas_revisadas} bien")
+    print(f"  Subidas:  {len(subidas_ok & subidas_haiku)} de {len(subidas_ok)} bien")
     print("\n".join(f"  ERROR: {e}" for e in errores) or "  Sin errores")
     return errores
 
 
 if __name__ == "__main__":
-    # python src/evaluador.py S016 → evalúa S001 a S016 (lo mismo que se le pasó al agente); sin nada → hasta S042
-    evaluar(int(sys.argv[1].lstrip("Ss")) if len(sys.argv) > 1 else 42)
+    # python src/evaluador.py S042 → evalúa S001 a S042 (lo mismo que se le pasó al agente); sin nada → hasta S060
+    evaluar(int(sys.argv[1].lstrip("Ss")) if len(sys.argv) > 1 else 60)

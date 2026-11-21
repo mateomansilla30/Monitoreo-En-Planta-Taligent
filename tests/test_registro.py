@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from registro import cerrar_turno, nuevo, procesar_snapshot  # noqa: E402
+from registro import aplicar_subidas, cerrar_turno, levantar, nuevo, procesar_snapshot, subir  # noqa: E402
 
 
 def problema(modelo, mercado, severidad):
@@ -18,7 +18,7 @@ loc = lambda sev: problema("SUV", "Local", sev)
 # ciclo de un caso: el ejemplo de SUV/Europa
 r = nuevo()
 assert procesar_snapshot(r, "S015", suv("media")) == [{"caso_id": "C001", "cambio": "abierto"}]
-assert procesar_snapshot(r, "S016", suv("critica")) == [{"caso_id": "C001", "cambio": "escalado"}]
+assert procesar_snapshot(r, "S016", suv("critica")) == [{"caso_id": "C001", "cambio": "escalado", "origen": "umbral"}]
 assert procesar_snapshot(r, "S017", suv("critica")) == []  # ya escalado: no vuelve a alertar
 assert procesar_snapshot(r, "S018", suv("media")) == []    # baja la severidad: sigue escalado
 assert r["casos"][0]["estado"] == "escalado"
@@ -31,7 +31,37 @@ assert procesar_snapshot(r, "S021", suv("media")) == [{"caso_id": "C002", "cambi
 # un caso que se abre ya en crítica se abre y se escala en la misma foto
 r = nuevo()
 assert procesar_snapshot(r, "S001", suv("critica")) == [{"caso_id": "C001", "cambio": "abierto"},
-                                                        {"caso_id": "C001", "cambio": "escalado"}]
+                                                        {"caso_id": "C001", "cambio": "escalado", "origen": "umbral"}]
+
+# subida de severidad por bitácora (criterio.md §5): la línea de Pickup parada sin fecha de vuelta
+parada = {"categoria": "parada_de_linea", "etapa": "montaje"}
+pickup = lambda mercado, sev: problema("Pickup", mercado, sev)
+r = nuevo()
+procesar_snapshot(r, "S034", pickup("Brasil", "media") + pickup("Local", "media") + problema("Sedán", "Local", "media"))
+brasil, local, sedan = r["casos"]
+brasil["causa"] = local["causa"] = dict(parada)
+sedan["causa"] = dict(parada)  # otro modelo con la misma causa: la subida no lo alcanza
+assert subir(r, brasil, "T17", "no hay fecha confirmada", "S034") == [
+    {"caso_id": "C001", "cambio": "escalado", "origen": "agente"},
+    {"caso_id": "C002", "cambio": "escalado", "origen": "agente"}]   # escalan los dos Pickup con esa causa
+assert sedan["estado"] != "escalado" and brasil["severidad_actual"] == "critica"
+
+# un caso que se abre mientras la subida sigue vigente escala cuando recibe la misma causa
+procesar_snapshot(r, "S035", pickup("Europa", "media") + pickup("Brasil", "media") + pickup("Local", "media"))
+europa = r["casos"][3]
+assert europa["estado"] == "abierto"
+europa["causa"] = dict(parada)
+assert aplicar_subidas(r, "S035") == [{"caso_id": "C004", "cambio": "escalado", "origen": "agente"}]
+
+# con la subida vigente, dos fotos sin problema por los números no resuelven el caso
+procesar_snapshot(r, "S036", []); procesar_snapshot(r, "S037", [])
+assert brasil["estado"] == "escalado" and brasil["severidad_actual"] == "critica"
+assert sedan["estado"] == "resuelto"  # el Sedán no tenía subida: se resolvió
+
+# levantada la subida, rige otra vez la severidad del código y se resuelve con dos fotos sin problema
+levantar(r["subidas"][0], "T19", "volvió a las 10:00", "S038")
+procesar_snapshot(r, "S039", []); procesar_snapshot(r, "S040", [])
+assert brasil["estado"] == "resuelto" and brasil["resuelto_en"] == "S040"
 
 # novedades del informe: turno T08 = S015 + S016, T09 = S017 + S018, T10 = S019 + S020
 r = nuevo()

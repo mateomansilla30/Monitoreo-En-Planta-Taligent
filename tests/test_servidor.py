@@ -19,7 +19,8 @@ async def probar():
         llamar = lambda tool, **args: c.call_tool(tool, args, raise_on_error=False)
 
         assert {t.name for t in await c.list_tools()} == {
-            "procesar_snapshot", "registrar_alerta", "registrar_informe", "leer_bitacora", "registrar_causa"}
+            "procesar_snapshot", "registrar_alerta", "registrar_informe", "leer_bitacora", "registrar_causa",
+            "subir_severidad", "levantar_subida"}
 
         # antes de la primera foto no hay ninguna bitácora escrita
         assert (await llamar("leer_bitacora", turno_id="T01")).is_error
@@ -65,7 +66,7 @@ async def probar():
 
         # S016: se escala y es cierre de T08, así que trae novedades y casos activos
         r = (await llamar("procesar_snapshot", snapshot_id="S016")).data
-        assert r["cambios"] == [{"caso_id": "C001", "cambio": "escalado"}]
+        assert r["cambios"] == [{"caso_id": "C001", "cambio": "escalado", "origen": "umbral"}]
         assert r["ultima_foto_del_turno"] and r["turno"] == "T08"
         assert [n["caso_id"] for n in r["novedades"]] == ["C001"]
         assert [c["caso_id"] for c in r["casos_activos"]] == ["C001"]
@@ -124,6 +125,69 @@ async def probar_no_declarada():
         assert buscar(await procesar("S020")) == {"C003": ["T10"]}
 
 
+async def probar_subida():
+    """La línea de Pickup se para en T17 sin fecha de vuelta y vuelve en T19 (criterio.md §5)."""
+    registro.RUTA = Path(tempfile.mkdtemp()) / "registro.json"
+    async with Client(mcp) as c:
+        llamar = lambda tool, **args: c.call_tool(tool, args, raise_on_error=False)
+        texto = lambda r: r.content[0].text
+        parada = "se paró la línea de montaje de Pickup por la rotura del transportador aéreo de la estación 3"
+        sin_fecha = "por ahora no hay fecha confirmada de vuelta"
+
+        await llamar("procesar_snapshot", snapshot_id="S033")
+        r = (await llamar("procesar_snapshot", snapshot_id="S034")).data  # cierre de T17: se abren Pickup Brasil y Local
+        assert r["cambios"] == [{"caso_id": "C001", "cambio": "abierto"}, {"caso_id": "C002", "cambio": "abierto"}]
+        assert r["revisar_subidas"] == []  # todavía no tienen causa
+
+        # lo que rechaza subir_severidad
+        assert (await llamar("subir_severidad", caso_id="C001", bitacora="T17", fragmento=sin_fecha)).is_error  # sin causa
+        for caso in ("C001", "C002"):
+            await llamar("registrar_causa", caso_id=caso, categoria="parada_de_linea", etapa="montaje",
+                         bitacora="T17", fragmento=parada)
+        assert (await llamar("subir_severidad", caso_id="C001", bitacora="T17",
+                             fragmento="no hay fecha de vuelta para nada")).is_error  # cita inventada
+        assert (await llamar("levantar_subida", caso_id="C001", bitacora="T17", fragmento=parada)).is_error  # no hay subida
+
+        # se sube: escalan los dos Pickup con esa causa, y no se puede subir dos veces
+        r = await llamar("subir_severidad", caso_id="C001", bitacora="T17", fragmento=sin_fecha)
+        assert not r.is_error and "C001, C002" in texto(r)
+        assert "cierra el turno" in texto(r)  # S034 es cierre: le avisa que los cuente en las novedades
+        assert (await llamar("subir_severidad", caso_id="C002", bitacora="T17", fragmento=sin_fecha)).is_error
+
+        # el informe de S034 confirma las novedades con lo que escaló en esta misma foto
+        await llamar("registrar_informe", snapshot_id="S034", texto="informe T17")
+        informe = registro.cargar()["informes"][-1]
+        assert informe["novedades"] == ["C001", "C002"]
+        assert registro.buscar_caso(registro.cargar(), "C001")["ultimo_informe"] == {"estado": "escalado", "severidad": "critica"}
+
+        # S035: se abre Pickup/Europa; al recibir la misma causa, escala por la subida vigente
+        r = (await llamar("procesar_snapshot", snapshot_id="S035")).data
+        assert {"caso_id": "C003", "cambio": "abierto"} in r["cambios"]
+        r = await llamar("registrar_causa", caso_id="C003", categoria="parada_de_linea", etapa="montaje",
+                         bitacora="T17", fragmento=parada)
+        assert "C003" in texto(r) and "Escalan" in texto(r)
+
+        # S036 cierra T18: sin alertas repetidas; los tres se revisan contra T18 con la subida vigente
+        r = (await llamar("procesar_snapshot", snapshot_id="S036")).data
+        assert not any(k["cambio"] == "escalado" for k in r["cambios"])
+        assert [n["caso_id"] for n in r["novedades"]] == ["C003"]  # C001 y C002 ya se informaron escalados en S034
+        assert [(s["caso_id"], s["subida_vigente"], s["bitacora"]) for s in r["revisar_subidas"]] == [
+            ("C001", True, "T18"), ("C002", True, "T18"), ("C003", True, "T18")]
+
+        # T19 todavía no se puede leer en S037; en S038 (cierre de T19) sí, y se levanta la subida
+        await llamar("procesar_snapshot", snapshot_id="S037")
+        volvio = "la línea de montaje de Pickup volvió a las 10:00"
+        assert (await llamar("levantar_subida", caso_id="C001", bitacora="T19", fragmento=volvio)).is_error
+        await llamar("procesar_snapshot", snapshot_id="S038")
+        assert not (await llamar("levantar_subida", caso_id="C001", bitacora="T19", fragmento=volvio)).is_error
+
+    cuaderno = registro.cargar()
+    assert [(s["subida_en"], s["levantada_en"]) for s in cuaderno["subidas"]] == [("S034", "S038")]
+    assert [(k["caso_id"], k["escalado_por"], k["alerta_enviada_en"]) for k in cuaderno["casos"]] == [
+        ("C001", "agente", "S034"), ("C002", "agente", "S034"), ("C003", "agente", "S035")]
+
+
 asyncio.run(probar())
 asyncio.run(probar_no_declarada())
+asyncio.run(probar_subida())
 print("ok")
