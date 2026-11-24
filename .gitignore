@@ -22,3 +22,7 @@ salidas/
 .idea/
 Thumbs.db
 .DS_Store
+
+# Front de la demo
+front/node_modules/
+front/dist/

@@ -32,6 +32,46 @@ Para ver solo las cuentas, sin el modelo: `python src/calculo.py S036` muestra l
 
 En Windows, si los acentos salen mal: `$env:PYTHONIOENCODING="utf-8"` (PowerShell) o `set PYTHONIOENCODING=utf-8` (cmd).
 
+## La demo
+
+Un front para presentar en vivo, en `front/`. Está hecho con React y Tailwind, con un diseño claro y sobrio: el color queda solo para la severidad. Los componentes vienen de 21st.dev: el Animated Beam de Magic UI para los conectores del diagrama, un Number Ticker y el Stepper de Origin UI. Lo sirve `src/demo.py`, un servidor chico en Python, solo con la librería estándar. Le da al front los datos y arranca el agente en vivo.
+
+La primera vez hay que armar el front (necesita Node):
+
+```
+cd front
+npm install
+npm run build
+```
+
+Después, para presentar, un solo comando:
+
+```
+python src/demo.py        # abre http://127.0.0.1:8765
+```
+
+Tiene siete partes, una idea por pantalla. Se pasa de una a otra con las flechas ← →, Re Pág / Av Pág (el puntero de presentación) o los números 1 a 7. Las flechas ↑ ↓ bajan y suben dentro de una parte:
+
+1. **El problema:** la planta y sus etapas, la información que hay, qué es un atraso (con dos ejemplos reales), cómo se sigue un caso, qué hay que avisar y por qué es difícil.
+2. **Qué resuelve:** los tres tipos de aviso y las 60 fotos de los 10 días pintadas según la severidad que calcula el código, con las alertas marcadas.
+3. **Cómo funciona:** los tres agentes, qué hace el código y qué el modelo, y las tools de cada agente.
+4. **En vivo:** el botón para correr el agente hasta S016, S036, S038 o los 10 días. Se ve:
+   - la planta foto por foto;
+   - lo que hace cada agente;
+   - lo que rechaza el código;
+   - el costo;
+   - cada alerta cuando sale.
+5. **Traza:** en qué foto salió una alerta, por qué escaló y la frase de la bitácora que la respalda. Arranca en la de Pickup/Brasil en S034, 8 horas antes de que los números llegaran a crítica (S036).
+6. **Resultados:** la nota del evaluador, el costo de uno contra tres agentes, la causa que falla (C006) y los días 8 a 10.
+7. **Avisos:** las alertas y los informes completos, para las preguntas.
+
+**De dónde sale cada parte:**
+- La corrida en vivo usa su propio cuaderno, en `salidas/demo/`, así no pisa la de los 10 días.
+- La traza, los resultados y los avisos salen de la última serie completa: `salidas/registro.json` y `salidas/resumen.json`.
+- Mientras el agente corre, el indicador de arriba a la derecha muestra en todas las partes por qué foto va y cuánto lleva gastado. Así se puede arrancar la corrida al principio y seguir presentando.
+
+**Para cambiar el front:** `python src/demo.py` en una terminal y `cd front && npm run dev` en otra. El front queda en http://127.0.0.1:5173 y se actualiza solo con cada cambio.
+
 ## Pruebas
 
 Están en `tests/`, una por archivo de `src/`. No usan la API ni tocan `salidas/registro.json`, y cada una imprime `ok` si pasa:
@@ -42,6 +82,7 @@ python tests/test_registro.py     # el ciclo de un caso y las novedades del info
 python tests/test_servidor.py     # las tools: lo que devuelven y lo que rechazan
 python tests/test_evaluador.py    # que el evaluador encuentre los errores de un agente
 python tests/test_agente.py       # lo que puede usar cada agente y los datos que les arma el código
+python tests/test_demo.py         # los eventos de la corrida en vivo que lee el front
 ```
 
 ## Cómo está armado
@@ -67,6 +108,8 @@ evaluador.py → compara lo que avisó Haiku con lo que tendría que haber avisa
 | `src/servidor_mcp.py` | Servidor MCP (FastMCP, stdio) con 7 tools. |
 | `src/agente.py` | Los tres agentes (coordinador, lector y redactor) y la serie: recorre las llegadas de `llegadas.csv` en orden. |
 | `src/evaluador.py` | Le pone nota a una corrida. |
+| `src/demo.py` | El servidor de la demo: datos para el front y la corrida en vivo. |
+| `front/` | El front de la demo (React + Tailwind, con componentes de 21st.dev). |
 | `tests/` | Las pruebas de cada archivo. |
 | `docs/M1.md` | Explicación de las cuentas, con ejemplos. |
 
@@ -119,7 +162,7 @@ coordinador  registrar_alerta(S034, C009, …)
 
 ## Decisiones de diseño
 
-**Lo que tiene reglas fijas lo hace el código; el modelo decide qué tool usar y redacta.** Las cuentas, el ciclo de un caso y qué es novedad están escritos como reglas en `criterio.md`, así que los aplica el código, que no se equivoca ni inventa. Haiku es un modelo chico y barato: lo que no tiene que decidir, no se lo dejamos decidir. Al modelo le queda lo que el código no puede hacer: redactar los avisos y, desde la Semana 2, leer las bitácoras.
+**Lo que tiene reglas fijas lo hace el código; el modelo decide qué tool usar y redacta.** Las cuentas, el ciclo de un caso y qué es novedad están escritos como reglas en `criterio.md`, así que los aplica el código: da siempre el mismo resultado y se puede probar. Haiku es un modelo chico y barato, y solo hace lo que necesita leer o escribir texto: redactar los avisos y, desde la Semana 2, leer las bitácoras.
 
 **El registro de casos vive fuera del modelo.** Es un archivo JSON (`salidas/registro.json`) con las fotos procesadas, los casos, las alertas y los informes. Cada foto es una conversación nueva con Haiku: no hace falta que recuerde nada porque la memoria es el cuaderno. Eso mantiene cada request chico y barato.
 
@@ -167,7 +210,7 @@ Las 61 llegadas (10 días, S034 llega dos veces), en dos corridas: la del 19/11 
   - Pickup Brasil y Local en S034 y Pickup Europa en S035, por la bitácora T17 ("por ahora no hay fecha confirmada de vuelta"). Salieron antes de que los números los volvieran críticos, en S036. La subida se levanta en S038 por T19 ("la línea de montaje de Pickup volvió a las 10:00").
   - SUV/Local en S058, por los números (faltan neumáticos).
 - **Los días 8 a 10, nunca vistos, con un agente:** 18 de 18 fotos, 1 de 1 alerta, 9 de 9 informes y 6 de 6 causas. No subió ninguna severidad, y era lo correcto: los neumáticos tienen fecha de entrega y la parada de SUV "Quedó reparada".
-- **La causa que falla es C006 SUV/Brasil.** La bitácora T09 habla del repintado de "SUV" sin decir el mercado, y cuando se abre el caso (S019) los datos ya no muestran etapa cuello. Haiku pone `no_declarada`, que es prudente. La tabla a mano dice `retrabajo` porque en S017–S018 había SUV para Brasil en repintado. Con tres agentes salió bien en 1 de 3 corridas: depende de si el lector une el repintado de T09 con este caso.
+- **La causa que falla es C006 SUV/Brasil.** La bitácora T09 habla del repintado de "SUV" sin decir el mercado, y cuando se abre el caso (S019) los datos ya no muestran etapa cuello. Haiku pone `no_declarada`. La tabla a mano dice `retrabajo` porque en S017–S018 había SUV para Brasil en repintado. Con tres agentes salió bien en 1 de 3 corridas: depende de si el lector une el repintado de T09 con este caso.
 
 **El costo de cada agente (23/11):**
 

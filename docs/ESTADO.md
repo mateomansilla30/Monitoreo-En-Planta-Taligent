@@ -1,6 +1,6 @@
 # Estado del proyecto y cómo seguir
 
-Documento para retomar el trabajo en otra computadora o en una sesión nueva de Claude. Actualizado el 23/11/2026.
+Documento para retomar el trabajo en otra computadora o en una sesión nueva de Claude. Actualizado el 24/11/2026.
 
 Leer primero: este archivo, después [`README.md`](../README.md) (cómo está armado y por qué) y la guía del curso, [`Proyecto Final Monitoreo en planta.pdf`](../Proyecto%20Final%20Monitoreo%20en%20planta.pdf). Las reglas del caso están en `Data/reglas/criterio.md` y `Data/reglas/umbrales.yaml`.
 
@@ -25,9 +25,10 @@ python tests/test_registro.py
 python tests/test_servidor.py
 python tests/test_evaluador.py
 python tests/test_agente.py
+python tests/test_demo.py
 ```
 
-Las cinco tienen que imprimir `ok`. Las líneas de `ERROR` que aparecen antes son a propósito: son los rechazos que esas pruebas buscan. `salidas/registro.json` (el cuaderno de la última corrida) tampoco está en git: se genera al correr el agente.
+Las seis tienen que imprimir `ok`. Las líneas de `ERROR` que aparecen antes son a propósito: son los rechazos que esas pruebas buscan. `salidas/registro.json` (el cuaderno de la última corrida) tampoco está en git: se genera al correr el agente.
 
 ## Qué está hecho
 
@@ -39,7 +40,7 @@ Las cinco tienen que imprimir `ok`. Las líneas de `ERROR` que aparecen antes so
 | 4 · Hooks, criterio como prompt MCP, permisos por agente | Los permisos por agente, en el código. Faltan hooks y criterio como prompt |
 | 5 · Salida estructurada, caché, idempotencia, días 8 a 10 | La idempotencia (la foto repetida S034) y los días 8 a 10 |
 | 6 · Serie completa con un comando, costo y tiempo | Completa: las 61 llegadas con `python src/agente.py` |
-| 7 · Demo Day | Falta preparar |
+| 7 · Demo Day | El front está hecho (`front/` + `python src/demo.py`, ver el README). Falta ensayar |
 
 ### Las piezas
 
@@ -53,6 +54,10 @@ Las cinco tienen que imprimir `ok`. Las líneas de `ERROR` que aparecen antes so
   - El coordinador los llama con dos tools que viven en `agente.py`, no en el servidor: `pedir_causa` y `pedir_texto`.
   - Lo que puede usar cada uno está en `PERMISOS` y lo frena `Agentes.ejecutar`.
   - Sin argumento corre las 61 llegadas; `python src/agente.py S042` corre de S001 a S042.
+- `src/demo.py` y `front/`: la demo.
+  - El servidor le da los datos al front: las cuentas de las 60 fotos, la última serie con la nota del evaluador y las bitácoras.
+  - También arranca el agente en vivo con `REGISTRO=salidas/demo/registro.json` y `EVENTOS=salidas/demo/eventos.jsonl`. Con esas variables, `agente.py` anota cada paso para el front y no pisa la serie guardada.
+  - Ojo: el servidor MCP corre en otro proceso y FastMCP no le pasa las variables de entorno. Por eso `agente.correr` le pasa `REGISTRO` explícitamente con `PythonStdioTransport(..., env=...)`.
 - `src/evaluador.py`: compara lo que hizo Haiku contra `agente_perfecto`, que son las reglas del código más las causas y la subida verificadas a mano (`CAUSAS_ESPERADAS` y `SUBIDAS_ESPERADAS`, para los 10 días). Se corre con la misma foto final que el agente: `python src/evaluador.py` o `python src/evaluador.py S042`. Después de una corrida completa, evaluar con `S042` no sirve: cuenta como "de más" todo lo posterior.
 
 ### Últimas corridas con Haiku
@@ -69,8 +74,14 @@ Las cinco tienen que imprimir `ok`. Las líneas de `ERROR` que aparecen antes so
 
 ## Lo próximo, en orden
 
-1. **Preparar la demo:** mostrar la traza de la alerta de los Pickup en S034 (en qué foto salió, por qué y con qué cita). Avisa 8 horas antes que los números (S036), por la bitácora T17. Está en `salidas/multi_S060.txt`, líneas 470 a 597 (S034 a S038), y se ve qué hace cada agente.
-2. Si sobra tiempo, el caché de prompts para el coordinador (Semana 5): es lo que más bajaría el costo.
+1. **Ensayar la demo:**
+   - Armar el front una vez: `cd front && npm install && npm run build`.
+   - Presentar con `python src/demo.py`.
+   - En la parte 4, correr "Hasta S036" (unos 6 minutos y USD 0,12). Conviene arrancarla al principio y seguir con las partes 1 a 3 mientras corre.
+   - La traza de la alerta de Pickup/Brasil en S034 está en la parte 5: sale 8 horas antes de que los números lleguen a crítica, por la bitácora T17.
+   - Si la API falla en vivo, las partes 5 a 7 salen de la corrida guardada y no necesitan la API.
+2. **Semana 4:** hooks en el loop y el criterio como prompt MCP.
+3. **Semana 5:** salida estructurada y caché de prompts para el coordinador, que es lo que más bajaría el costo.
 
 ## Problemas conocidos (chicos)
 

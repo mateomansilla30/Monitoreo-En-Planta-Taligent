@@ -1,10 +1,13 @@
 import copy
 import json
+import os
 from pathlib import Path
 
 from calculo import SEVERIDADES
 
-RUTA = Path(__file__).resolve().parent.parent / "salidas" / "registro.json"  # las pruebas la cambian por una temporal
+# Las pruebas la cambian por una temporal; la demo en vivo usa otra (variable REGISTRO), así no pisa la última corrida.
+# El servidor MCP corre en otro proceso, pero hereda la variable: los dos usan el mismo cuaderno.
+RUTA = Path(os.environ.get("REGISTRO") or Path(__file__).resolve().parent.parent / "salidas" / "registro.json")
 
 
 def nuevo():
@@ -21,7 +24,7 @@ def cargar():
 
 
 def guardar(registro):
-    RUTA.parent.mkdir(exist_ok=True)
+    RUTA.parent.mkdir(parents=True, exist_ok=True)
     with open(RUTA, "w", encoding="utf-8") as f:
         json.dump(registro, f, ensure_ascii=False, indent=2)
 

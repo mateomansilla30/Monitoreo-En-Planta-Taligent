@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+/* Claro y sobrio: fondo gris muy claro, tarjetas blancas, un solo acento (azul petróleo).
+   El color fuerte queda solo para lo que significa algo: la severidad. */
+@theme {
+  --font-sans: "IBM Plex Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-fondo: #f4f5f7;
+  --color-tarjeta: #ffffff;
+  --color-suave: #f0f2f5;
+  --color-linea: #e1e5ea;
+  --color-linea-fuerte: #c9d0d8;
+  --color-tinta: #111827;
+  --color-tinta-2: #4b5563;
+  --color-tinta-3: #6b7280;
+
+  --color-acento: #0f5e70;
+  --color-acento-suave: #e5f0f2;
+
+  /* los agentes: azul, cian y verde (ninguno se confunde con la severidad) */
+  --color-coord: #1d4ed8;
+  --color-lector: #0e7490;
+  --color-redactor: #15803d;
+  --color-codigo: #475569;
+
+  /* severidad: el relleno y el texto (el texto, más oscuro para que se lea sobre blanco) */
+  --color-sev-ninguna: #e4e8ed;
+  --color-sev-media: #f0bf45;
+  --color-sev-alta: #e8873a;
+  --color-sev-critica: #d0364c;
+  --color-sev-media-t: #8a5a00;
+  --color-sev-alta-t: #b04d0c;
+  --color-sev-critica-t: #b0243a;
+}
+
+/* Los nombres estándar de shadcn, que usan los componentes de 21st, apuntan a nuestra paleta */
+@theme inline {
+  --color-primary: var(--color-acento);
+  --color-primary-foreground: #ffffff;
+  --color-muted: var(--color-suave);
+  --color-muted-foreground: var(--color-tinta-2);
+}
+
+@theme inline {
+  --animate-latido: latido 1.8s ease-out infinite;
+  @keyframes latido {
+    0% { transform: scale(1); opacity: 0.6; }
+    100% { transform: scale(2.2); opacity: 0; }
+  }
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  background: var(--color-fondo);
+  color: var(--color-tinta);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible { outline: 2px solid var(--color-acento); outline-offset: 2px; border-radius: 4px; }
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Alertas e informes en Markdown */
+.md { line-height: 1.6; color: var(--color-tinta); }
+.md > * + * { margin-top: 0.75rem; }
+.md strong { font-weight: 600; }
+.md ul { list-style: disc; padding-left: 1.25rem; }
+.md li + li { margin-top: 0.35rem; }
+.md li::marker { color: var(--color-tinta-3); }
+.md table { width: 100%; border-collapse: collapse; font-size: 0.85em; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--color-linea); padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
+.md th { background: var(--color-suave); color: var(--color-tinta-2); font-weight: 600; white-space: nowrap; }
+
+.scroll-fino { scrollbar-width: thin; scrollbar-color: var(--color-linea-fuerte) transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

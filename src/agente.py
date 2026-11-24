@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import json
+import os
 import sys
 import time
 from collections import Counter, defaultdict
@@ -9,6 +10,7 @@ from pathlib import Path
 import anthropic
 from dotenv import load_dotenv
 from fastmcp import Client
+from fastmcp.client.transports import PythonStdioTransport
 
 import calculo
 import registro
@@ -17,6 +19,14 @@ MODELO = "claude-haiku-5-5"
 PRECIO_POR_MILLON = {"input_tokens": 0.10, "output_tokens": 0.50}  # USD, Haiku 5.5 con prompts de menos de 100K tokens
 SERVIDOR = Path(__file__).resolve().parent / "servidor_mcp.py"
 uso = defaultdict(Counter)  # por agente: cuántas veces se armó y los tokens que gastó
+EVENTOS = os.environ.get("EVENTOS")  # si está, cada paso se anota ahí (un JSON por línea) para el front de la demo
+
+
+def evento(tipo, **datos):
+    """Anota un paso de la corrida para el front. Sin la variable EVENTOS no hace nada."""
+    if EVENTOS:
+        with open(EVENTOS, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"tipo": tipo, "t": round(time.time(), 2), **datos}, ensure_ascii=False) + "\n")
 
 # Tres agentes y un solo registro. Los tres son Haiku: los distingue el prompt, las tools y el primer mensaje.
 # - coordinador: uno por foto. Procesa la foto, decide qué pedir y es el ÚNICO que escribe en el cuaderno.
@@ -312,6 +322,7 @@ class Agentes:
         if not bitacoras:
             return "Faltan las bitácoras a leer.", True
         print(f"  coordinador pide al lector la causa de {caso['caso_id']} en {', '.join(bitacoras)}")
+        evento("pide", a="lector", caso_id=caso["caso_id"], bitacoras=bitacoras)
         return await self.conversar("lector", mensaje_lector(cuaderno, caso, bitacoras)), False
 
     async def redactor(self, pedido):
@@ -327,11 +338,13 @@ class Agentes:
             if any(a["caso_id"] == caso["caso_id"] and a["snapshot_id"] == foto for a in cuaderno["alertas"]):
                 return f"La alerta de {caso['caso_id']} ya está registrada en esta foto.", True
             print(f"  coordinador pide al redactor la alerta de {caso['caso_id']}")
+            evento("pide", a="redactor", que="alerta", caso_id=caso["caso_id"])
             mensaje = mensaje_alerta(cuaderno, caso)
         elif pedido.get("tipo") == "informe":
             if not any(t["snapshot_cierre"] == foto for t in calculo.leer_turnos()):
                 return f"{foto} no es la última foto de su turno: el informe va solo en el cierre.", True
             print("  coordinador pide al redactor el informe del turno")
+            evento("pide", a="redactor", que="informe")
             mensaje = mensaje_informe(cuaderno)
         else:
             return "tipo tiene que ser 'alerta' o 'informe'.", True
@@ -374,6 +387,7 @@ def mostrar_foto(d):
 def mostrar(agente, pedido, texto, es_error):
     """Imprime qué pidió cada agente y qué pasó, para seguir la corrida foto por foto."""
     nombre, datos = pedido.name, pedido.input
+    evento("tool", agente=agente, nombre=nombre, datos=datos, texto=texto, error=es_error)
     if es_error:
         print(f"  {agente} → {nombre} -> ERROR: {texto}")
     elif nombre == "procesar_snapshot":
@@ -415,17 +429,36 @@ def costo(u):
     return sum(u[k] * precio / 1_000_000 for k, precio in PRECIO_POR_MILLON.items())
 
 
+def costos():
+    """Lo gastado hasta ahora, por agente y en total."""
+    total = sum(uso.values(), Counter())
+    return {"agentes": {a: {"veces": uso[a]["veces"], "input_tokens": uso[a]["input_tokens"],
+                            "output_tokens": uso[a]["output_tokens"], "usd": round(costo(uso[a]), 4)} for a in PERMISOS},
+            "input_tokens": total["input_tokens"], "output_tokens": total["output_tokens"], "usd": round(costo(total), 4)}
+
+
 async def correr(hasta=ULTIMA_FOTO):
     if not 1 <= hasta <= ULTIMA_FOTO:
         raise SystemExit(f"La última foto tiene que estar entre S001 y S{ULTIMA_FOTO:03}.")
     registro.RUTA.unlink(missing_ok=True)  # cuaderno vacío al empezar la serie
     inicio = time.time()
-    async with Client(SERVIDOR) as mcp:
+    fotos = llegadas(hasta)
+    evento("inicio", hasta=f"S{hasta:03}", total=len(fotos))
+    # el servidor corre en otro proceso y FastMCP no le pasa las variables de entorno: el cuaderno se lo decimos acá,
+    # así el agente y el servidor usan siempre el mismo (el de la demo en vivo no es el de la serie completa)
+    servidor = PythonStdioTransport(SERVIDOR, env={"REGISTRO": str(registro.RUTA)})
+    async with Client(servidor) as mcp:
         agentes = Agentes(anthropic.AsyncAnthropic(), mcp, await mcp.list_tools())
-        for orden, snapshot_id in enumerate(llegadas(hasta), start=1):
+        for orden, snapshot_id in enumerate(fotos, start=1):
             print(f"{snapshot_id} (llegada {orden})")
+            evento("llegada", snapshot_id=snapshot_id, orden=orden, total=len(fotos))
             await agentes.conversar("coordinador", f"Llegó la foto {snapshot_id}.")
+            evento("costo", **costos())
     minutos = (time.time() - inicio) / 60
+    # el resumen de la corrida queda al lado del cuaderno: lo muestra el front de la demo
+    resumen = {"hasta": f"S{hasta:03}", "minutos": round(minutos, 1), "fecha": time.strftime("%d/%m/%Y %H:%M"), **costos()}
+    registro.RUTA.with_name("resumen.json").write_text(json.dumps(resumen, ensure_ascii=False, indent=2), encoding="utf-8")
+    evento("fin", **resumen)
 
     cuaderno = registro.cargar()
     print("\nCasos:")

@@ -101,9 +101,9 @@ def subidas(cuaderno):
     return {(s["modelo"], s["categoria"], s["etapa"], s["subida_en"], s["levantada_en"]) for s in cuaderno.get("subidas", [])}
 
 
-def evaluar(hasta):
+def resultado(hasta, haiku):
+    """La nota de un cuaderno de S001 a 'hasta': [bien, total] de cada cosa, y la lista de errores."""
     perfecto = agente_perfecto(hasta)
-    haiku = registro.cargar()
     fotos = [f"S{i:03}" for i in range(1, hasta + 1)]
     alertas_ok = {(a["snapshot_id"], combinacion(perfecto, a["caso_id"])) for a in perfecto["alertas"]}
     informes_ok = {i["snapshot_id"] for i in perfecto["informes"]}
@@ -143,14 +143,24 @@ def evaluar(hasta):
     errores += [f"faltó la subida de severidad: {describir(s)}" for s in sorted(subidas_ok - subidas_haiku, key=str)]
     errores += [f"subida de severidad de más: {describir(s)}" for s in sorted(subidas_haiku - subidas_ok, key=str)]
 
+    return {"fotos": [len(fotos) - len(faltan_fotos), len(fotos)],
+            "alertas": [len(alertas_ok & set(alertas)), len(alertas_ok)],
+            "informes": [len(informes_ok & set(informes)), len(informes_ok)],
+            "causas": [causas_bien, causas_revisadas],
+            "subidas": [len(subidas_ok & subidas_haiku), len(subidas_ok)],
+            "errores": errores}
+
+
+def evaluar(hasta):
+    r = resultado(hasta, registro.cargar())
     print(f"Evaluación de S001 a S{hasta:03}")
-    print(f"  Fotos procesadas: {len(fotos) - len(faltan_fotos)} de {len(fotos)}")
-    print(f"  Alertas:  {len(alertas_ok & set(alertas))} de {len(alertas_ok)} bien")
-    print(f"  Informes: {len(informes_ok & set(informes))} de {len(informes_ok)} bien")
-    print(f"  Causas:   {causas_bien} de {causas_revisadas} bien")
-    print(f"  Subidas:  {len(subidas_ok & subidas_haiku)} de {len(subidas_ok)} bien")
-    print("\n".join(f"  ERROR: {e}" for e in errores) or "  Sin errores")
-    return errores
+    print(f"  Fotos procesadas: {r['fotos'][0]} de {r['fotos'][1]}")
+    print(f"  Alertas:  {r['alertas'][0]} de {r['alertas'][1]} bien")
+    print(f"  Informes: {r['informes'][0]} de {r['informes'][1]} bien")
+    print(f"  Causas:   {r['causas'][0]} de {r['causas'][1]} bien")
+    print(f"  Subidas:  {r['subidas'][0]} de {r['subidas'][1]} bien")
+    print("\n".join(f"  ERROR: {e}" for e in r["errores"]) or "  Sin errores")
+    return r["errores"]
 
 
 if __name__ == "__main__":
