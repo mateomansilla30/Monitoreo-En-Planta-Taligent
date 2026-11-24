@@ -203,7 +203,7 @@ def evaluar(snapshot_id):
         resultado.append({
             "modelo": modelo, "mercado": mercado,
             # el gap con signo invertido; si va adelantado, 0
-            "autos_faltantes": max(-unidades, 0), "autos_faltantes_pct": max(-round(pct, 1), 0),
+            "autos_faltantes": max(0, -unidades), "autos_faltantes_pct": max(0, -round(pct, 1)),  # el 0 primero: si empatan, max devuelve el primero y no queda -0.0
             "severidad_por_faltantes": sev_gap,
             "autos_que_pierden_embarque": autos_atrasados[(modelo, mercado)], "dias_de_retraso": dias,
             "severidad_por_embarque": sev_retraso,

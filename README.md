@@ -26,7 +26,7 @@ python src/agente.py S042      # solo hasta S042 (días 1 a 7)
 python src/evaluador.py S042
 ```
 
-El agente imprime foto por foto qué encontró, qué cambió en el cuaderno y qué escribió Haiku, y al final el tiempo, los tokens y el costo. El cuaderno queda en `salidas/registro.json`.
+El agente imprime foto por foto qué encontró, qué cambió en el cuaderno, qué le pidió el coordinador a cada agente y qué quedó registrado. Al final imprime el costo de cada agente y el tiempo, los tokens y el costo total. El cuaderno queda en `salidas/registro.json`.
 
 Para ver solo las cuentas, sin el modelo: `python src/calculo.py S036` muestra los desvíos de esa foto.
 
@@ -41,18 +41,21 @@ python tests/test_calculo.py      # las cuentas, con ejemplos verificados a mano
 python tests/test_registro.py     # el ciclo de un caso y las novedades del informe
 python tests/test_servidor.py     # las tools: lo que devuelven y lo que rechazan
 python tests/test_evaluador.py    # que el evaluador encuentre los errores de un agente
+python tests/test_agente.py       # lo que puede usar cada agente y los datos que les arma el código
 ```
 
 ## Cómo está armado
 
 ```
-agente.py ──"llegó S016"──► Haiku
-    ▲                          │ pide tools
-    │                          ▼
-    └──── resultado ◄──── servidor_mcp.py ──► calculo.py
-                               │
-                               ▼
-                         registro.py → salidas/registro.json
+agente.py, una vez por foto:
+
+"llegó S034" ──► coordinador ── procesar_snapshot, registrar_* ──► servidor_mcp.py ──► calculo.py
+                  │        │                                           │  ▲
+      pedir_causa │        │ pedir_texto                               ▼  │
+                  ▼        ▼                               registro.py → salidas/registro.json
+               lector    redactor (sin tools)                             │
+                  │                                                       │
+                  └──────────────────── leer_bitacora ────────────────────┘
 
 evaluador.py → compara lo que avisó Haiku con lo que tendría que haber avisado
 ```
@@ -62,7 +65,7 @@ evaluador.py → compara lo que avisó Haiku con lo que tendría que haber avisa
 | `src/calculo.py` | Las cuentas de `criterio.md`: gap contra el plan, retraso contra el embarque alcanzable, severidad mínima y etapa cuello. Ver `docs/M1.md`. |
 | `src/registro.py` | El cuaderno de casos: abre, sigue, escala y resuelve casos; salta fotos repetidas; arma las novedades de cada informe. |
 | `src/servidor_mcp.py` | Servidor MCP (FastMCP, stdio) con 7 tools. |
-| `src/agente.py` | El loop con Haiku: recorre las llegadas de `llegadas.csv` en orden. |
+| `src/agente.py` | Los tres agentes (coordinador, lector y redactor) y la serie: recorre las llegadas de `llegadas.csv` en orden. |
 | `src/evaluador.py` | Le pone nota a una corrida. |
 | `tests/` | Las pruebas de cada archivo. |
 | `docs/M1.md` | Explicación de las cuentas, con ejemplos. |
@@ -78,6 +81,41 @@ evaluador.py → compara lo que avisó Haiku con lo que tendría que haber avisa
 | `levantar_subida(caso_id, bitacora, fragmento)` | Cuando una bitácora posterior dice que la causa se resolvió. | Un caso sin subida vigente, una cita inventada. |
 | `registrar_alerta(snapshot_id, caso_id, texto)` | Cuando un caso se escala. | Una foto no procesada o un caso que no existe. |
 | `registrar_informe(snapshot_id, texto)` | En la última foto del turno. | Una foto no procesada o que no es cierre. |
+
+## Varios agentes
+
+Cada foto la trabajan tres agentes, en `src/agente.py`. Los tres son Haiku 5.5: los distingue el prompt, las tools que reciben y el mensaje con el que arrancan.
+
+| Agente | Qué hace | Tools que puede usar | ¿Escribe en el cuaderno? |
+|---|---|---|---|
+| **Coordinador** | Uno por foto. Procesa la foto, decide qué pedir y a quién, y anota todo. | `procesar_snapshot`, `registrar_causa`, `subir_severidad`, `levantar_subida`, `registrar_alerta`, `registrar_informe`, `pedir_causa`, `pedir_texto` | Sí, es el único |
+| **Lector** | Lee las bitácoras de un caso y propone la causa, con su cita, y en qué estado está: sigue sin fecha de resolución (`sin_fecha`), tiene fecha (`con_fecha`), se resolvió (`resuelta`) o la bitácora no dice (`no_dice`). | `leer_bitacora` | No: devuelve un JSON |
+| **Redactor** | Escribe una alerta o un informe. | Ninguna | No: devuelve el texto |
+
+**Cómo se hablan.** El coordinador pide ayuda con dos tools que no están en el servidor MCP sino en `agente.py`: `pedir_causa` (un caso y qué bitácoras leer) y `pedir_texto` (la alerta de un caso o el informe). Para Haiku son tools como las demás. Cuando las pide, el código no llama al servidor: arma una conversación nueva con el lector o el redactor y le devuelve su respuesta al coordinador como resultado de la tool. El mensaje para cada uno lo arma el código, con solo lo que necesita:
+- **Al lector:** el caso, la etapa donde se traban los autos según los datos, la causa ya registrada con su cita, y qué bitácoras leer. Si el caso ya tiene causa, se le pide solo su estado.
+- **Al redactor:** la foto, los números de cada caso, la causa con su cita y, para el informe, las novedades y los casos activos sacados del cuaderno. Por eso no necesita tools, y no puede citar algo que no le llegó.
+
+Por ejemplo, la alerta de los Pickup en S034:
+
+```
+coordinador  procesar_snapshot(S034)          → C009 y C010 abiertos: buscarles causa en T17 y T16
+coordinador  pedir_causa(C009, [T17, T16])    → el lector lee T17 y T16 y propone:
+                                                parada_de_linea (montaje), estado sin_fecha,
+                                                "por ahora no hay fecha confirmada de vuelta"
+coordinador  registrar_causa(C009, ...)       → el servidor verifica la cita
+coordinador  subir_severidad(C009, T17, ...)  → C009 y C010 escalan a crítica
+coordinador  pedir_texto(alerta, C009)        → el redactor escribe la alerta con los datos que le arma el código
+coordinador  registrar_alerta(S034, C009, …)
+```
+
+**Un solo agente escribe.** El lector y el redactor proponen; el coordinador decide y anota con las tools del servidor, que siguen verificando cada cita. Con varios agentes escribiendo, dos podrían anotar lo mismo dos veces o pisarse.
+
+**Los permisos los impone el código, no el prompt.** Cada agente recibe solo su lista de tools (`PERMISOS` en `agente.py`), y `Agentes.ejecutar` rechaza cualquier otra aunque el modelo la pida: el lector no puede registrar, el redactor no puede leer y el coordinador no puede leer bitácoras por su cuenta. `pedir_texto` además revisa el pedido antes de armar al redactor: la alerta, solo para un caso que escaló en esa foto y una sola vez; el informe, solo en el cierre de turno. En una corrida el coordinador pidió la alerta de un caso que ya había avisado (C007 en S022) y el código la frenó. Lo comprueba `tests/test_agente.py`, sin usar la API.
+
+**Por qué se divide en leer y escribir, y no por tipo de problema.** Mirar el gap, el retraso contra el embarque o la etapa cuello no necesita un modelo: son cuentas de `calculo.py`. Lo que necesita un modelo es leer bitácoras y redactar, así que esos son los dos trabajos que se separan, cada uno con un prompt corto y enfocado.
+
+**Cada agente tiene su costo.** Al final de cada corrida se imprime cuántas veces se armó cada agente y cuánto gastó (ver "Resultados").
 
 ## Decisiones de diseño
 
@@ -106,31 +144,54 @@ evaluador.py → compara lo que avisó Haiku con lo que tendría que haber avisa
 - Los umbrales se leen como "desde": un gap de exactamente 10 % ya es media.
 - Una subida alcanza a los casos del mismo modelo con la misma causa (categoría y etapa): la línea de montaje de Pickup parada afecta a Pickup en los tres mercados.
 
-**Días apartados.** Los días 8 a 10 (S043–S060) quedaron afuera mientras se armaba el agente: todo se ajustó con los días 1 a 7. Sus causas se anotaron a mano en el evaluador antes de correrlos, y se corrieron una sola vez, sin tocar el agente. Así miden si anda con datos que nunca vio.
+**Días apartados.** Los días 8 a 10 (S043–S060) quedaron afuera mientras se armaba el agente: todo se ajustó con los días 1 a 7. Sus causas se anotaron a mano en el evaluador antes de correrlos, y se corrieron una sola vez, sin tocar el agente. Así miden si anda con datos que nunca vio. Esa prueba a ciegas es la del 19/11, con un solo agente. Después, al armar los varios agentes, una corrida de los 10 días mostró que el lector subía la severidad de la SUV por T30 ("Siguen faltando los neumáticos de la SUV local"), que no habla de la fecha, y se ajustó la regla del lector. Por eso las corridas de los días 8 a 10 con varios agentes ya no son a ciegas.
 
 ## Resultados
 
-Corrida de las 61 llegadas (10 días, S034 llega dos veces), 19/11/2026:
+Las 61 llegadas (10 días, S034 llega dos veces), en dos corridas: la del 19/11 con un solo agente, que fue la prueba a ciegas de los días 8 a 10, y la del 23/11 con los tres agentes.
 
-| | Días 1 a 7 (con los que se ajustó) | Días 8 a 10 (nunca vistos) |
+| | Un agente (19/11) | Tres agentes (23/11) |
 |---|---|---|
-| Fotos | 42 de 42 | 18 de 18 |
-| Alertas | 4 de 4: SUV/Europa en S016; Pickup Brasil y Local en S034 y Europa en S035, por la bitácora T17 ("por ahora no hay fecha confirmada de vuelta"), antes de que los números los volvieran críticos en S036 | 1 de 1: SUV/Local en S058, por los números (faltan neumáticos) |
-| Informes | 21 de 21 | 9 de 9 |
-| Causas | 10 de 11 | 6 de 6 |
-| Subida de severidad | 1 de 1: Pickup desde S034 (T17), levantada en S038 (T19, "la línea de montaje de Pickup volvió a las 10:00") | Ninguna, y era lo correcto: los neumáticos tienen fecha de entrega y la parada de SUV "Quedó reparada" |
+| Fotos | 60 de 60 | 60 de 60 |
+| Alertas | 5 de 5 | 5 de 5 |
+| Informes | 30 de 30 | 30 de 30 |
+| Causas | 16 de 17 | 16 de 17 |
+| Subida de severidad | 1 de 1 | 1 de 1 |
+| Tiempo | 5,4 min | 9,9 min |
+| Tokens | 1.071.374 de entrada y 55.088 de salida | 1.556.561 de entrada y 107.992 de salida |
+| Costo | **USD 0,13** | **USD 0,21** |
 
 - **Total:** 17 casos, 5 alertas, 30 informes (10 sin novedades). La foto repetida S034 se procesó una sola vez.
-- **Tiempo y costo:** 5,4 min · 1.071.374 tokens de entrada y 55.088 de salida · **USD 0,13** por los 10 días.
-- **La causa que falla es C006 SUV/Brasil.** La bitácora T09 habla del repintado de "SUV" sin decir el mercado, y cuando se abre el caso (S019) los datos ya no muestran etapa cuello. Haiku pone `no_declarada`, que es prudente. La tabla a mano dice `retrabajo` porque en S017–S018 había SUV para Brasil en repintado.
-- **Ruido que no cambia nada:**
-  - Haiku a veces procesa una foto dos veces (S024).
-  - Intenta subir o levantar la misma causa en cada Pickup, y la tool lo rechaza porque ya está hecho.
-  - A veces nombra como novedad un caso que no cambió.
+- **Las alertas, en las dos corridas:**
+  - SUV/Europa en S016, por los números.
+  - Pickup Brasil y Local en S034 y Pickup Europa en S035, por la bitácora T17 ("por ahora no hay fecha confirmada de vuelta"). Salieron antes de que los números los volvieran críticos, en S036. La subida se levanta en S038 por T19 ("la línea de montaje de Pickup volvió a las 10:00").
+  - SUV/Local en S058, por los números (faltan neumáticos).
+- **Los días 8 a 10, nunca vistos, con un agente:** 18 de 18 fotos, 1 de 1 alerta, 9 de 9 informes y 6 de 6 causas. No subió ninguna severidad, y era lo correcto: los neumáticos tienen fecha de entrega y la parada de SUV "Quedó reparada".
+- **La causa que falla es C006 SUV/Brasil.** La bitácora T09 habla del repintado de "SUV" sin decir el mercado, y cuando se abre el caso (S019) los datos ya no muestran etapa cuello. Haiku pone `no_declarada`, que es prudente. La tabla a mano dice `retrabajo` porque en S017–S018 había SUV para Brasil en repintado. Con tres agentes salió bien en 1 de 3 corridas: depende de si el lector une el repintado de T09 con este caso.
 
-Los registros completos de las dos corridas quedan en `salidas/corrida_S042.txt` y `salidas/corrida_S060.txt` (no están en git).
+**El costo de cada agente (23/11):**
+
+| Agente | Veces que se armó | Costo |
+|---|---|---|
+| Coordinador | 61, una por llegada | USD 0,165 |
+| Lector | 37 | USD 0,025 |
+| Redactor | 35: 5 alertas y 30 informes | USD 0,020 |
+
+**Por qué cuesta más con tres agentes.** Casi todo el aumento es del coordinador, que por cada aviso hace una vuelta más: pide el texto y después lo registra. Así, cada alerta e informe pasa dos veces por él. Entra como resultado de `pedir_texto` y sale copiado en `registrar_alerta` o `registrar_informe`, y los tokens de salida cuestan 5 veces más que los de entrada. Además, su prompt y sus 8 tools van de nuevo en cada vuelta. La palanca para bajarlo es el caché de prompts (Semana 5), porque esa parte es igual en todas las vueltas.
+
+**Qué se gana con tres agentes, con la misma nota del evaluador:**
+- Los informes traen los números de cada caso activo, que el criterio pide en la tabla, y salen siempre con el mismo formato.
+- Hay menos ruido: en toda la serie hubo un solo pedido rechazado (volver a subir la severidad de C011). El agente solo intentaba subir y levantar la subida en cada Pickup.
+- Lo que puede hacer cada agente lo controla el código, y cada parte se prueba por separado.
+
+**Ruido que no cambia nada, con un agente:**
+- A veces procesa una foto dos veces (S024).
+- Intenta subir o levantar la misma causa en cada Pickup, y la tool lo rechaza porque ya está hecho.
+- A veces nombra como novedad un caso que no cambió.
+
+Los registros completos quedan en `salidas/` (no están en git): `corrida_S042.txt` y `corrida_S060.txt` con un agente, y `multi_S060.txt` con tres. También están `multi_S020.txt` y `multi_S042.txt`, corridas con versiones intermedias; la de S042 dio los días 1 a 7 sin errores, con C006 bien, por USD 0,14.
 
 ## Lo que falta
 
-- **Semanas 3 a 5:** varios agentes con uno solo que escribe en el registro, hooks, criterio como prompt MCP, salida estructurada y caché.
+- **Semanas 4 y 5:** hooks, criterio como prompt MCP, salida estructurada y caché (que bajaría el costo del coordinador). Los permisos por agente ya están.
 - **Evaluador:** todavía no revisa el texto de los avisos ni mide el ruido (novedades que repiten algo ya informado).
