@@ -1,13 +1,13 @@
 # Estado del proyecto y cómo seguir
 
-Documento para retomar el trabajo en otra computadora o en una sesión nueva de Claude. Actualizado el 24/11/2026.
+Documento para retomar el trabajo en otra computadora o en una sesión nueva de Claude. Actualizado el 27/11/2026: versión final, la que se entrega.
 
 Leer primero: este archivo, después [`README.md`](../README.md) (cómo está armado y por qué) y la guía del curso, [`Proyecto Final Monitoreo en planta.pdf`](../Proyecto%20Final%20Monitoreo%20en%20planta.pdf). Las reglas del caso están en `Data/reglas/criterio.md` y `Data/reglas/umbrales.yaml`.
 
 ## Fechas
 
-- **Demo Day: miércoles 25/11/2026.** Hay que mostrar qué resuelve, una corrida en vivo con su costo, y la traza de una alerta: en qué foto salió, por qué y con qué cita de la bitácora.
-- Pendiente de Mateo: preguntarle a Laura (la mentora) qué priorizar para la demo.
+- **Demo Day: miércoles 25/11/2026.** Se mostró el problema, cómo funciona, una corrida en vivo con su costo, la traza de una alerta (en qué foto salió, por qué y con qué cita de la bitácora) y los resultados.
+- **27/11/2026:** entrega del repositorio, en esta versión.
 
 ## Puesta en marcha en una compu nueva
 
@@ -40,7 +40,7 @@ Las seis tienen que imprimir `ok`. Las líneas de `ERROR` que aparecen antes son
 | 4 · Hooks, criterio como prompt MCP, permisos por agente | Completa: hooks antes de cada tool, después y al terminar; el criterio de cada agente es un prompt del servidor MCP |
 | 5 · Salida estructurada, caché, idempotencia, días 8 a 10 | Completa: avisos estructurados y validados, salida estructurada del lector, caché (verificado con `cache_read_input_tokens`), Batch API evaluada en el README |
 | 6 · Serie completa con un comando, costo y tiempo | Completa: las 61 llegadas con `python src/agente.py` |
-| 7 · Demo Day | El front está hecho (`front/` + `python src/demo.py`, ver el README). Falta ensayar |
+| 7 · Demo Day | Completa: el front (`front/` + `python src/demo.py`, ver el README) con las seis partes de la presentación |
 
 ### Las piezas
 
@@ -62,30 +62,31 @@ Las seis tienen que imprimir `ok`. Las líneas de `ERROR` que aparecen antes son
 
 ### Últimas corridas con Haiku
 
-| | Un agente (19/11) | Tres agentes (23/11) |
-|---|---|---|
-| Resultado de los 10 días | 16/17 causas, todo lo demás bien | 16/17 causas, todo lo demás bien |
-| Tiempo y costo | 5,4 min · USD 0,13 | 9,9 min · USD 0,21 (coordinador 0,165, lector 0,025, redactor 0,020) |
-| Registro | `salidas/corrida_S060.txt` | `salidas/multi_S060.txt` |
+| | Un agente (19/11) | Tres agentes, sin caché (23/11) | Tres agentes, con caché y hooks (25/11) |
+|---|---|---|---|
+| Resultado de los 10 días | 16/17 causas, todo lo demás bien | 16/17 causas, todo lo demás bien | 16/17 causas, todo lo demás bien |
+| Tiempo y costo | 5,4 min · USD 0,13 | 9,9 min · USD 0,21 (coordinador 0,165, lector 0,025, redactor 0,020) | 10,2 min · USD 0,087 (coordinador 0,054, lector 0,014, redactor 0,019) |
+| Registro | `salidas/corrida_S060.txt` | `salidas/multi_S060.txt` (cuaderno en `salidas/corrida_23-11/`) | `salidas/multi_cache_S060.txt` (cuaderno en `salidas/registro.json`, el que muestra la demo) |
 
-- La causa que falla es **C006 SUV/Brasil**, el caso límite. La bitácora T09 habla del repintado de "SUV" sin decir el mercado, y en S019 los datos ya no muestran etapa cuello. Con tres agentes salió bien en 1 de 3 corridas. Mateo decidió dejarlo así y explicarlo en la demo.
+- La causa que falla es **C006 SUV/Brasil**, el caso límite. La bitácora T09 habla del repintado de "SUV" sin decir el mercado, y en S019 los datos ya no muestran etapa cuello. Con tres agentes salió bien en 1 de 4 corridas. Mateo decidió dejarlo así y explicarlo en la demo.
 - C008 Sedán/Brasil es la trampa (la bitácora no dice por qué) y queda `no_declarada`, que es lo correcto.
 - Los días 8 a 10 ya no son a ciegas. Con tres agentes, una corrida subió la severidad de la SUV por T30 ("Siguen faltando los neumáticos de la SUV local"), y se ajustó la regla del lector: `sin_fecha` solo si la frase dice que falta la fecha. Después, las 7 preguntas difíciles al lector (T17, T18 y T19 de los Pickup; T08 y T09 de C004; T29 y T30 de los neumáticos), 3 veces cada una, dieron 21 de 21. La prueba a ciegas es la del 19/11.
 
-## Lo próximo, en orden
+## Cómo presentar la demo
 
-1. **Ensayar la demo:**
-   - Armar el front una vez: `cd front && npm install && npm run build`.
-   - Presentar con `python src/demo.py`.
-   - En la parte 4, correr "Hasta S036" (unos 6 minutos y USD 0,12). Conviene arrancarla al principio y seguir con las partes 1 a 3 mientras corre.
-   - La traza de la alerta de Pickup/Brasil en S034 está en la parte 5: sale 8 horas antes de que los números lleguen a crítica, por la bitácora T17.
-   - Si la API falla en vivo, las partes 5 a 7 salen de la corrida guardada y no necesitan la API.
-2. **Corrida completa de los 10 días** con los hooks, la salida estructurada y el caché, para actualizar los resultados y el costo del README.
-3. **Evaluador:** medir el ruido de los informes (novedades que repiten algo ya informado).
+- Armar el front una vez: `cd front && npm install && npm run build`. Presentar con `python src/demo.py` (abre `http://127.0.0.1:8765`).
+- Seis partes: 1 El problema (12 escenas, con ↓ ↑), 2 Cómo funciona, 3 En vivo, 4 Traza, 5 Resultados, 6 Avisos.
+- En la parte 3, "Hasta S016" tarda unos 2 minutos y cuesta unos USD 0,02. Las partes 4 a 6 salen de la corrida guardada y no necesitan la API.
+
+## Mejoras posibles
+
+- **Evaluador:** medir el ruido de los informes (novedades que repiten algo ya informado) y revisar el texto de los avisos.
+- **Costo:** que el código registre la alerta o el informe apenas el redactor termina, así el texto no pasa dos veces por el coordinador.
+- **Alerta anticipada:** proyectar la tendencia y avisar antes de cruzar el umbral.
 
 ## Problemas conocidos (chicos)
 
-- Con tres agentes, el coordinador a veces intenta subir la severidad de un caso que ya la tiene subida (C011 en S035). La tool lo rechaza; no cambia nada.
+- Con tres agentes, el coordinador a veces intenta algo que no corresponde: en la corrida del 23/11, subir otra vez la severidad de C011 (la tool lo rechazó); en la del 25/11, mandar de nuevo la alerta de C004 en S017 (lo frenó `hook_alerta`). No cambia nada.
 - Cada informe pasa dos veces por el coordinador (lo recibe del redactor y lo copia al registrarlo). Es la mayor parte del costo de más.
 - El evaluador todavía no mide el ruido de los informes (nombrar como novedad un caso que no cambió) ni revisa el texto de los avisos.
 
