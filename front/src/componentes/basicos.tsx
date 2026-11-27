@@ -1,9 +1,9 @@
 import { animate, motion, useMotionValue, useTransform } from "motion/react";
-import { useEffect, type ReactNode } from "react";
+import { Fragment, useEffect, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { FONDO_SEVERIDAD, NOMBRE_SEVERIDAD, TEXTO_SEVERIDAD, type Severidad } from "@/datos";
+import { FONDO_SEVERIDAD, NOMBRE_CATEGORIA, NOMBRE_SEVERIDAD, TEXTO_SEVERIDAD, type Alerta, type Severidad } from "@/datos";
 import { cn } from "@/lib/utils";
 
 /** Un número que se anima hasta su valor cada vez que cambia (el costo en vivo, los contadores). */
@@ -85,6 +85,35 @@ export function Cita({ children, color = "lector", className }: { children: Reac
     <blockquote className={cn("border-l-2 pl-3 text-pretty text-tinta", borde, className)}>
       “{children}”
     </blockquote>
+  );
+}
+
+/** Los campos de una alerta estructurada, como los guardó el código. Las corridas viejas no los tienen: no muestra nada. */
+export function CamposAlerta({ alerta, className }: { alerta: Alerta; className?: string }) {
+  if (!alerta.origen) return null;
+  return (
+    <dl className={cn("grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-md border border-linea bg-suave px-4 py-3 text-sm", className)}>
+      <dt className="text-tinta-3">origen</dt>
+      <dd>{alerta.origen === "agente" ? "agente (subida por la bitácora)" : "umbral (los números)"}</dd>
+      {alerta.severidad && (
+        <>
+          <dt className="text-tinta-3">severidad</dt>
+          <dd><EtiquetaSeveridad severidad={alerta.severidad} /></dd>
+        </>
+      )}
+      {alerta.causa && (
+        <>
+          <dt className="text-tinta-3">causa</dt>
+          <dd>{NOMBRE_CATEGORIA[alerta.causa.categoria] ?? alerta.causa.categoria}{alerta.causa.etapa && ` en ${alerta.causa.etapa}`}</dd>
+        </>
+      )}
+      {(alerta.evidencia ?? []).map((e, i) => (
+        <Fragment key={i}>
+          <dt className="text-tinta-3">{i === 0 ? "evidencia" : ""}</dt>
+          <dd><span className="font-mono text-xs text-tinta-2">{e.bitacora}</span> “{e.fragmento}”</dd>
+        </Fragment>
+      ))}
+    </dl>
   );
 }
 

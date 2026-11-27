@@ -1,69 +1,11 @@
-import { BellOff, BellRing, FileText } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
-import NumberTicker from "@/components/basic-number-ticker";
-import { EtiquetaSeveridad, Tarjeta, Titulo } from "@/componentes/basicos";
-import { useDatos } from "@/contexto";
+import { EtiquetaSeveridad, Tarjeta } from "@/componentes/basicos";
 import { FONDO_SEVERIDAD, MERCADOS, MODELOS, NOMBRE_SEVERIDAD, buscarCaso, comb, diaDe, horaDe, numeroFoto, type Cuaderno, type Foto, type Serie, type Severidad } from "@/datos";
 import { cn } from "@/lib/utils";
 
-const AVISOS = [
-  { icono: BellRing, nombre: "Alerta inmediata", texto: "cuando un caso pasa a crítico", color: "text-sev-critica-t", caja: "border-t-sev-critica" },
-  { icono: FileText, nombre: "Informe de turno", texto: "lo que cambió en el turno", color: "text-coord", caja: "border-t-coord" },
-  { icono: BellOff, nombre: "Sin aviso", texto: "si el caso no cambió", color: "text-tinta-3", caja: "border-t-linea-fuerte" },
-];
-
-export default function Portada() {
-  const { serie, guardada } = useDatos();
-  const cuaderno = guardada?.registro ?? null;
-  const numeros = cuaderno
-    ? [
-        { valor: cuaderno.casos.length, nombre: "casos" },
-        { valor: cuaderno.alertas.length, nombre: "alertas" },
-        { valor: cuaderno.informes.length, nombre: "informes" },
-      ]
-    : [];
-
-  return (
-    <div className="mx-auto max-w-[1320px] px-6 py-8 pb-20 lg:px-10">
-      <Titulo
-        parte="2 · Qué resuelve"
-        titulo="Tres tipos de aviso"
-        bajada="En cada foto calcula los atrasos, los sigue como casos y busca la causa en la bitácora."
-      >
-        {numeros.length > 0 && (
-          <dl className="flex gap-8">
-            {numeros.map((n) => (
-              <div key={n.nombre} className="text-right">
-                <dd className="font-mono text-4xl font-medium">
-                  <NumberTicker from={0} target={n.valor} transition={{ duration: 1.2, ease: "easeOut" }} className="tabular" />
-                </dd>
-                <dt className="text-sm text-tinta-2">{n.nombre} en 10 días</dt>
-              </div>
-            ))}
-          </dl>
-        )}
-      </Titulo>
-
-      <ul className="mt-6 grid gap-5 md:grid-cols-3">
-        {AVISOS.map(({ icono: Icono, nombre, texto, color, caja }) => (
-          <li key={nombre} className={cn("flex items-center gap-4 rounded-lg border border-linea border-t-4 bg-tarjeta p-5", caja)}>
-            <Icono className={cn("size-8 shrink-0", color)} aria-hidden />
-            <div>
-              <p className="text-xl font-semibold">{nombre}</p>
-              <p className="text-tinta-2">{texto}</p>
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      <MapaDeCalor serie={serie} cuaderno={cuaderno} />
-    </div>
-  );
-}
-
 /** Las 9 combinaciones en las 60 fotos, pintadas con la severidad que calcula el código. El punto blanco marca las alertas. */
-function MapaDeCalor({ serie, cuaderno }: { serie: Serie | null; cuaderno: Cuaderno | null }) {
+export function MapaDeCalor({ serie, cuaderno }: { serie: Serie | null; cuaderno: Cuaderno | null }) {
   const [foco, setFoco] = useState<{ foto: Foto; combinacion: string } | null>(null);
   // la reproducción: cuántas fotos ya "llegaron". Con movimiento reducido, se muestra entero.
   const quieto = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -87,7 +29,7 @@ function MapaDeCalor({ serie, cuaderno }: { serie: Serie | null; cuaderno: Cuade
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold">Los 10 días, foto por foto</h3>
-          <p className="text-sm text-tinta-3">Cada columna es una foto, cada 4 horas</p>
+          <p className="text-sm text-tinta-3">Cada columna es una foto. El color es la severidad de los números; el punto blanco, una alerta.</p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {(["ninguna", "media", "alta", "critica"] as Severidad[]).map((sev) => (
@@ -203,10 +145,31 @@ function MapaDeCalor({ serie, cuaderno }: { serie: Serie | null; cuaderno: Cuade
             {n.faltantes > 0 && <span className="text-tinta-2">faltan {n.faltantes} de {n.plan}</span>}
             {alertas.has(`${foco.foto.id}|${foco.combinacion}`) && <span className="font-semibold text-sev-critica-t">alerta enviada</span>}
           </>
-        ) : (
-          <span className="text-tinta-3">Pasá el mouse por una foto para ver el detalle</span>
-        )}
+        ) : serie && cuaderno ? (
+          <Alertas serie={serie} cuaderno={cuaderno} />
+        ) : null}
       </div>
     </Tarjeta>
+  );
+}
+
+/** Las 5 alertas y por qué salió cada una: si los números ya estaban en crítica, por los números; si no, por la bitácora. */
+function Alertas({ serie, cuaderno }: { serie: Serie; cuaderno: Cuaderno }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+      <span className="font-medium">Las {cuaderno.alertas.length} alertas</span>
+      {cuaderno.alertas.map((a) => {
+        const caso = buscarCaso(cuaderno, a.caso_id);
+        if (!caso) return null;
+        const c = comb(caso);
+        const numeros = serie.fotos.find((f) => f.id === a.snapshot_id)?.combinaciones[c]?.severidad === "critica";
+        return (
+          <span key={`${a.snapshot_id}${c}`} className="whitespace-nowrap">
+            <span className="font-mono">{a.snapshot_id}</span> {c} ·{" "}
+            <span className={numeros ? "text-tinta-2" : "font-semibold text-sev-critica-t"}>{numeros ? "los números" : "la bitácora"}</span>
+          </span>
+        );
+      })}
+    </div>
   );
 }

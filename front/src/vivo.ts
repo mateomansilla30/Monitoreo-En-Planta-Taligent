@@ -1,7 +1,23 @@
 // Convierte los eventos de la corrida en vivo (lo que anota agente.py) en lo que se muestra en pantalla.
 import { NOMBRE_CATEGORIA, type Agente, type Costos, type Evento, type Resumen, type Serie, type Severidad } from "./datos";
 
-export type ClaseItem = "llegada" | "agente" | "alerta" | "subida" | "levanta" | "frenado" | "informe" | "fin" | "repetida";
+export type ClaseItem = "llegada" | "agente" | "apertura" | "alerta" | "subida" | "levanta" | "frenado" | "informe" | "fin" | "repetida";
+
+/** Un caso que se abre: por qué, con los números del código. */
+export interface Apertura {
+  caso_id: string;
+  combinacion: string;
+  severidad: Severidad;
+  faltantes: number;
+  pct: number;
+  sevFaltantes: Severidad;
+  pierden: number;
+  dias: number;
+  sevEmbarque: Severidad;
+  etapa: string | null;
+  plan?: number; // autos que tendrían que haber salido desde S001
+  real?: number;
+}
 
 export interface ItemFeed {
   id: number;
@@ -13,8 +29,10 @@ export interface ItemFeed {
   cita?: string;
   estado?: string; // el estado que propone el lector: sin_fecha, con_fecha, resuelta, no_dice
   chips?: { texto: string; severidad?: Severidad }[];
-  texto?: string; // la alerta completa
+  texto?: string; // la alerta o el informe completo
   foto?: string;
+  apertura?: Apertura;
+  accion?: string; // qué fue: la tool que se usó, "pide_lector", "pide_redactor", "llegada", "hook" o "fin" (lo usa el diagrama de los agentes)
 }
 
 export interface AlertaVivo {
@@ -65,7 +83,8 @@ export function resumirVivo(eventos: Evento[], serie: Serie | null): ResumenVivo
   let foto: string | undefined;
 
   eventos.forEach((e, id) => {
-    const base = { id, t: e.t, foto };
+    const accion = e.tipo === "tool" ? e.nombre : e.tipo === "pide" ? `pide_${e.a}` : e.tipo;
+    const base = { id, t: e.t, foto, accion };
     switch (e.tipo) {
       case "inicio":
         r.inicio = { t: e.t, hasta: e.hasta, total: e.total };
@@ -98,6 +117,10 @@ export function resumirVivo(eventos: Evento[], serie: Serie | null): ResumenVivo
           detalle: e.a === "lector" ? `Bitácoras: ${(e.bitacoras ?? []).join(", ")}` : undefined,
         });
         return;
+      case "hook": // un hook de al terminar: al coordinador le faltaba algo de la foto
+        r.frenados += 1;
+        r.feed.push({ ...base, clase: "frenado", agente: "coordinador", titulo: `El hook ${e.hook} no lo deja terminar`, detalle: e.motivo });
+        return;
       case "tool":
         break;
     }
@@ -106,14 +129,23 @@ export function resumirVivo(eventos: Evento[], serie: Serie | null): ResumenVivo
     const d = e.datos;
     if (e.error) {
       r.frenados += 1;
-      r.feed.push({ ...base, clase: "frenado", agente: e.agente, titulo: `El código rechazó ${e.nombre}`, detalle: e.texto });
+      r.feed.push({
+        ...base, clase: "frenado", agente: e.agente,
+        titulo: e.hook ? `El hook ${e.hook} frenó ${e.nombre}` : `El servidor rechazó ${e.nombre}`,
+        detalle: e.texto,
+      });
       return;
     }
     switch (e.nombre) {
       case "procesar_snapshot": {
         let p: {
           ya_procesada?: boolean;
-          problemas?: { modelo: string; mercado: string; severidad_final: Severidad }[];
+          problemas?: {
+            modelo: string; mercado: string; caso_id?: string; severidad_final: Severidad;
+            autos_faltantes: number; autos_faltantes_pct: number; severidad_por_faltantes: Severidad;
+            autos_que_pierden_embarque: number; dias_de_retraso: number; severidad_por_embarque: Severidad;
+            etapa_donde_se_traban: string | null;
+          }[];
           cambios?: { caso_id: string; cambio: string; origen?: string }[];
         } = {};
         try {
@@ -126,12 +158,31 @@ export function resumirVivo(eventos: Evento[], serie: Serie | null): ResumenVivo
           r.feed.push({ ...base, clase: "repetida", agente: "coordinador", titulo: "Foto repetida: ya estaba procesada", detalle: "El registro no cambia y no se repite ningún aviso." });
           return;
         }
-        const cambios = (p.cambios ?? []).map((c) => `${c.caso_id} ${c.cambio.replace("_", " ")}`);
+        // las aperturas van en filas propias; acá quedan los otros cambios (escalado, resuelto)
+        const abiertos = (p.cambios ?? []).filter((c) => c.cambio === "abierto");
+        const otros = (p.cambios ?? []).filter((c) => c.cambio !== "abierto").map((c) => `${c.caso_id} ${c.cambio.replace("_", " ")}`);
         r.feed.push({
           ...base, clase: "agente", agente: "coordinador",
           titulo: "Procesa la foto",
-          detalle: cambios.length ? `Registro: ${cambios.join(" · ")}` : (p.problemas ?? []).length ? "Sin cambios en el registro" : "Sin desvíos",
+          detalle: otros.length ? `Registro: ${otros.join(" · ")}` : abiertos.length ? undefined : (p.problemas ?? []).length ? "Sin cambios en el registro" : "Sin desvíos",
           chips: (p.problemas ?? []).map((x) => ({ texto: `${x.modelo}/${x.mercado}`, severidad: x.severidad_final })),
+        });
+        abiertos.forEach((c, k) => {
+          const x = p.problemas?.find((q) => q.caso_id === c.caso_id);
+          if (!x) return;
+          const combinacion = `${x.modelo}/${x.mercado}`;
+          const numeros = serie?.fotos.find((f) => f.id === foto)?.combinaciones[combinacion];
+          r.feed.push({
+            ...base, id: id + (k + 1) / 100, // vienen del mismo evento: cada una con su id
+            clase: "apertura",
+            titulo: `Se abre el caso ${c.caso_id} · ${combinacion}`,
+            apertura: {
+              caso_id: c.caso_id, combinacion, severidad: x.severidad_final,
+              faltantes: x.autos_faltantes, pct: x.autos_faltantes_pct, sevFaltantes: x.severidad_por_faltantes,
+              pierden: x.autos_que_pierden_embarque, dias: x.dias_de_retraso, sevEmbarque: x.severidad_por_embarque,
+              etapa: x.etapa_donde_se_traban, plan: numeros?.plan, real: numeros?.real,
+            },
+          });
         });
         return;
       }
@@ -191,10 +242,16 @@ export function resumirVivo(eventos: Evento[], serie: Serie | null): ResumenVivo
         r.feed.push({ ...base, clase: "alerta", agente: "coordinador", titulo: `ALERTA · ${alerta.caso_id}`, texto: alerta.texto });
         return;
       }
-      case "registrar_informe":
+      case "registrar_informe": {
         r.informes += 1;
-        r.feed.push({ ...base, clase: "informe", agente: "coordinador", titulo: `Registra el informe de cierre de ${foto ?? texto(d.snapshot_id)}` });
+        const turno = serie?.fotos.find((f) => f.id === (foto ?? texto(d.snapshot_id)))?.turno;
+        r.feed.push({
+          ...base, clase: "informe", agente: "coordinador",
+          titulo: turno ? `Informe de cierre del turno ${turno}` : "Informe de cierre de turno",
+          texto: texto(d.texto), // el informe completo, para leerlo en el feed
+        });
         return;
+      }
       default:
         r.feed.push({ ...base, clase: "agente", agente: e.agente, titulo: e.nombre, detalle: lista(d.bitacoras).join(", ") || undefined });
     }

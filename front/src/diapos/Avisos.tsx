@@ -1,6 +1,6 @@
 import { BellRing, FileText } from "lucide-react";
 import { useState } from "react";
-import { Markdown, Tarjeta, Titulo } from "@/componentes/basicos";
+import { CamposAlerta, Markdown, Tarjeta, Titulo } from "@/componentes/basicos";
 import { useDatos } from "@/contexto";
 import { buscarCaso, comb, numeroFoto } from "@/datos";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,7 @@ export default function Avisos() {
   return (
     <div className="mx-auto max-w-[1320px] px-6 py-8 pb-20 lg:px-10">
       <Titulo
-        parte="7 · Avisos"
+        parte="6 · Avisos"
         titulo={`Las ${alertas.length} alertas y los ${informes.length} informes`}
         bajada={`${informes.filter((i) => !i.novedades.length).length} de los ${informes.length} informes no tienen novedades.`}
       />
@@ -82,6 +82,7 @@ export default function Avisos() {
         </Tarjeta>
 
         <Tarjeta className="min-h-[420px] p-6">
+          {elegido.tipo === "alerta" && alertas[elegido.indice] && <CamposAlerta alerta={alertas[elegido.indice]} className="mb-4" />}
           {actual ? <Markdown texto={actual.texto} /> : <p className="text-tinta-2">Elegí un aviso de la lista.</p>}
         </Tarjeta>
       </div>

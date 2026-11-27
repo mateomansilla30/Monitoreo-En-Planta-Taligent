@@ -7,7 +7,6 @@ import { cn } from "@/lib/utils";
 import Avisos from "@/diapos/Avisos";
 import ComoFunciona from "@/diapos/ComoFunciona";
 import EnVivo from "@/diapos/EnVivo";
-import Portada from "@/diapos/Portada";
 import Problema from "@/diapos/Problema";
 import Resultados from "@/diapos/Resultados";
 import Traza from "@/diapos/Traza";
@@ -15,7 +14,6 @@ import Traza from "@/diapos/Traza";
 // Las partes de la presentación, en el orden en que se cuentan.
 const DIAPOS: { id: string; nombre: string; Diapo: ComponentType }[] = [
   { id: "problema", nombre: "El problema", Diapo: Problema },
-  { id: "resuelve", nombre: "Qué resuelve", Diapo: Portada },
   { id: "como", nombre: "Cómo funciona", Diapo: ComoFunciona },
   { id: "vivo", nombre: "En vivo", Diapo: EnVivo },
   { id: "traza", nombre: "Traza", Diapo: Traza },
@@ -39,11 +37,12 @@ export default function App() {
   }, []);
   const ir = useCallback((id: string) => irA(DIAPOS.findIndex((d) => d.id === id)), [irA]);
 
-  // ← → y Re Pág / Av Pág (los punteros de presentación) cambian de parte; ↑ ↓ bajan y suben dentro de la parte; 1 a 7 saltan
+  // ← → y Re Pág / Av Pág (los punteros de presentación) cambian de parte; ↑ ↓ bajan y suben dentro de la parte; 1 a 6 saltan
   useEffect(() => {
     const tecla = (e: KeyboardEvent) => {
       if (e.altKey || e.ctrlKey || e.metaKey) return;
-      if ((e.target as HTMLElement).closest("input, textarea, select, [contenteditable]")) return;
+      // en un campo de texto las teclas escriben; en un deslizador no: el puntero de presentación tiene que seguir andando
+      if ((e.target as HTMLElement).closest("input:not([type=range]), textarea, select, [contenteditable]")) return;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         pagina.current?.scrollBy({ top: (e.key === "ArrowDown" ? 1 : -1) * window.innerHeight * 0.5, behavior: "smooth" });
@@ -53,7 +52,7 @@ export default function App() {
       } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
         e.preventDefault();
         irA(actual.current - 1);
-      } else if (/^[1-7]$/.test(e.key)) {
+      } else if (/^[1-6]$/.test(e.key)) {
         irA(Number(e.key) - 1);
       }
     };
@@ -100,9 +99,8 @@ export default function App() {
               ))}
             </nav>
 
-            <div className="flex items-center">
-              <EstadoCorrida />
-            </div>
+            {/* el estado de la corrida se ve solo en "En vivo" */}
+            <div className="flex items-center">{DIAPOS[indice].id === "vivo" && <EstadoCorrida />}</div>
           </header>
 
           <main className="relative flex-1 overflow-hidden">

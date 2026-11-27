@@ -84,17 +84,28 @@ export interface Caso {
   escalado_por?: "umbral" | "agente";
   resuelto_en?: string;
 }
+export interface Evidencia {
+  bitacora: string;
+  fragmento: string;
+}
 export interface Alerta {
   snapshot_id: string;
   caso_id: string;
   texto: string;
+  // los avisos estructurados (desde el 24/11); las corridas viejas solo traen lo de arriba
+  origen?: "umbral" | "agente";
+  severidad?: Severidad;
+  estado?: EstadoCaso;
+  causa?: { categoria: string; etapa: string | null } | null;
+  evidencia?: Evidencia[];
 }
 export interface Informe {
   snapshot_id: string;
   turno: string;
   texto: string;
-  novedades: string[];
-  casos_activos: string[];
+  // en las corridas nuevas son avisos estructurados; en las viejas, solo el id del caso (ver idsDe)
+  novedades: (string | { caso_id: string })[];
+  casos_activos: (string | { caso_id: string })[];
 }
 export interface Subida {
   modelo: string;
@@ -123,6 +134,9 @@ export interface CostoAgente {
 }
 export interface Costos {
   agentes: Record<Agente, CostoAgente>;
+  // las corridas con caché (desde el 24/11) traen los tokens leídos y escritos; input_tokens es lo que no salió del caché
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
   input_tokens: number;
   output_tokens: number;
   usd: number;
@@ -151,7 +165,8 @@ export interface Guardada {
 export type Evento =
   | { tipo: "inicio"; t: number; hasta: string; total: number }
   | { tipo: "llegada"; t: number; snapshot_id: string; orden: number; total: number }
-  | { tipo: "tool"; t: number; agente: Agente; nombre: string; datos: Record<string, unknown>; texto: string; error: boolean }
+  | { tipo: "tool"; t: number; agente: Agente; nombre: string; datos: Record<string, unknown>; texto: string; error: boolean; hook?: string | null }
+  | { tipo: "hook"; t: number; momento: string; hook: string; motivo: string }
   | { tipo: "pide"; t: number; a: "lector" | "redactor"; caso_id?: string; bitacoras?: string[]; que?: "alerta" | "informe" }
   | ({ tipo: "costo"; t: number } & Costos)
   | ({ tipo: "fin"; t: number } & Resumen);
@@ -189,12 +204,23 @@ export const numeroFoto = (s: string) => Number(s.slice(1));
 export const buscarCaso = (cuaderno: Cuaderno | null | undefined, id: string) =>
   cuaderno?.casos.find((c) => c.caso_id === id);
 
+/** Los ids de casos de una lista de novedades o de casos activos, sea del formato viejo (ids) o del nuevo (avisos). */
+export const idsDe = (lista: (string | { caso_id: string })[]) => lista.map((x) => (typeof x === "string" ? x : x.caso_id));
+
 /** La subida de severidad vigente para el modelo, si hay. */
 export const subidaVigente = (cuaderno: Cuaderno | null | undefined, modelo: string) =>
   cuaderno?.subidas.find((s) => s.modelo === modelo && s.levantada_en === null);
 
+/** Lo que habría costado lo mismo sin caché: todos los tokens de entrada a precio normal (Haiku 5.5: 0,10 y 0,50 por millón). */
+export const costoSinCache = (c: Costos) =>
+  ((c.input_tokens + (c.cache_read_input_tokens ?? 0) + (c.cache_creation_input_tokens ?? 0)) * 0.1 + c.output_tokens * 0.5) / 1e6;
+
 // Corridas anteriores, documentadas en el README (no se recalculan).
 export const HISTORIAL = {
   unAgente: { fecha: "19/11", minutos: 5.4, usd: 0.13, input_tokens: 1_071_374, output_tokens: 55_088 },
+  // los tres agentes, antes del caché y de los hooks (salidas/corrida_23-11/resumen.json)
+  tresAgentes: { fecha: "23/11", minutos: 9.9, usd: 0.2097, input_tokens: 1_556_561, output_tokens: 107_992 },
   aCiegas: { fotos: [18, 18] as Nota, alertas: [1, 1] as Nota, informes: [9, 9] as Nota, causas: [6, 6] as Nota },
+  // la misma corrida, hasta S038, antes y después del caché (24/11): la misma nota del evaluador
+  cache: { hasta: "S038", antes: 0.137, despues: 0.054, leidos: 946_762, pagados: 610, escritos: 85_842 },
 };

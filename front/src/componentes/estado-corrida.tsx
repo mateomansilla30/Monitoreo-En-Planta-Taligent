@@ -3,7 +3,7 @@ import { Numero } from "@/componentes/basicos";
 import { useDatos } from "@/contexto";
 import { usd } from "@/datos";
 
-/** Arriba a la derecha, en todas las partes: si hay una corrida en marcha, por dónde va y cuánto lleva gastado. */
+/** Arriba a la derecha, solo en "En vivo": si hay una corrida en marcha, por dónde va y cuánto lleva gastado. */
 export function EstadoCorrida() {
   const { vivo, resumen, ir } = useDatos();
   const base = "flex shrink-0 items-center gap-2 rounded-md border px-3 py-1.5 text-sm";

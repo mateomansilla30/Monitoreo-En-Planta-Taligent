@@ -44,7 +44,7 @@ export function Tablero({ cuaderno, foto, serie }: { cuaderno: Cuaderno | null; 
             const subida = subidaVigente(cuaderno, modelo);
             const conSubida = !!caso && !!subida && caso.causa?.categoria === subida.categoria;
             return (
-              <div key={mercado} className={cn("relative min-h-[96px] overflow-hidden rounded-md border border-linea p-2.5 pt-3 transition-colors duration-500", CELDA[severidad])}>
+              <div key={mercado} className={cn("relative min-h-[82px] overflow-hidden rounded-md border border-linea px-2.5 pt-2.5 pb-2 transition-colors duration-500", CELDA[severidad])}>
                 <span className={cn("absolute inset-x-0 top-0 h-1", FRANJA[severidad])} />
                 {caso?.estado === "escalado" && (
                   <span aria-hidden className="absolute top-2.5 right-2.5 flex size-2">
@@ -53,20 +53,20 @@ export function Tablero({ cuaderno, foto, serie }: { cuaderno: Cuaderno | null; 
                   </span>
                 )}
                 <p className={cn("text-xs font-medium", TEXTO_SEVERIDAD[severidad])}>{NOMBRE_SEVERIDAD[severidad]}</p>
-                {caso ? (
+                {caso && (
                   <>
-                    <p className="mt-1 font-mono text-base leading-none font-medium">{caso.caso_id}</p>
-                    <p className="mt-0.5 text-xs text-tinta-2">{NOMBRE_ESTADO[caso.estado]}</p>
+                    <p className="mt-1 flex items-baseline gap-1.5">
+                      <span className="font-mono text-base leading-none font-medium">{caso.caso_id}</span>
+                      <span className="text-xs text-tinta-2">{NOMBRE_ESTADO[caso.estado]}</span>
+                    </p>
                     {caso.causa && (
-                      <p className="mt-0.5 truncate text-[11px] text-tinta-3" title={NOMBRE_CATEGORIA[caso.causa.categoria]}>
+                      <p className="mt-1 truncate text-[11px] text-tinta-3" title={NOMBRE_CATEGORIA[caso.causa.categoria]}>
                         {NOMBRE_CATEGORIA[caso.causa.categoria] ?? caso.causa.categoria}
                       </p>
                     )}
                   </>
-                ) : (
-                  <p className="mt-1 text-xs text-tinta-3">sin caso</p>
                 )}
-                <div className="mt-1 flex items-center justify-between gap-1 text-[11px] text-tinta-3">
+                <div className="mt-0.5 flex items-center justify-between gap-1 text-[11px] text-tinta-3">
                   {n && n.faltantes > 0 ? <span className="tabular">faltan {n.faltantes}</span> : <span />}
                   {conSubida && (
                     <span title="Severidad subida por la bitácora" className="inline-flex items-center gap-0.5 font-medium text-sev-critica-t">

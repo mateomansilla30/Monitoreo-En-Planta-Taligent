@@ -1,7 +1,7 @@
 import { BellRing, BookOpenText, CheckCircle2, Flame } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Cita, EtiquetaSeveridad, Markdown, Rotulo, Tarjeta, Titulo } from "@/componentes/basicos";
+import { CamposAlerta, Cita, EtiquetaSeveridad, Markdown, Rotulo, Tarjeta, Titulo } from "@/componentes/basicos";
 import { useDatos } from "@/contexto";
 import {
   FONDO_SEVERIDAD, NOMBRE_CATEGORIA, buscarCaso, comb, decimal, horaDe, numeroFoto, pedir,
@@ -25,9 +25,9 @@ export default function Traza() {
   return (
     <div className="mx-auto max-w-[1320px] px-6 py-8 pb-20 lg:px-10">
       <Titulo
-        parte="5 · Traza"
+        parte="4 · Traza"
         titulo="Traza de una alerta"
-        bajada={`En qué foto salió, por qué y con qué cita.${guardada?.resumen ? ` Corrida completa del ${guardada.resumen.fecha}.` : ""}`}
+        bajada={`En qué foto salió, por qué y con qué cita.${guardada?.resumen ? ` Corrida completa del ${guardada.resumen.fecha.slice(0, 10)}.` : ""}`}
       >
         {alertas.length > 0 && (
           <div role="tablist" aria-label="Elegir la alerta" className="flex overflow-hidden rounded-md border border-linea bg-tarjeta">
@@ -150,7 +150,11 @@ function DetalleTraza({ alerta, caso, cuaderno, serie }: { alerta: Alerta; caso:
             ))}
 
             <Paso n={porBitacora && subida ? 5 : 4} titulo="Se registra la alerta" sub="pedir_texto → registrar_alerta">
-              <p>La escribe el redactor y la registra el coordinador.</p>
+              <p>
+                La escribe el redactor y la registra el coordinador. Antes, un hook revisa que sea la foto en que el caso
+                escaló y que no se repita; el código completa los campos y los valida.
+              </p>
+              <CamposAlerta alerta={alerta} className="mt-2" />
             </Paso>
 
             {subida?.levantada_en && (
