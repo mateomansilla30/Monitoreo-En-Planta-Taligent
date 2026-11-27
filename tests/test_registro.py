@@ -5,7 +5,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from registro import aplicar_subidas, cerrar_turno, levantar, nuevo, procesar_snapshot, subir  # noqa: E402
+from registro import (  # noqa: E402
+    aplicar_subidas, aviso, cerrar_turno, falta_confirmar, levantar, nuevo, procesar_snapshot, subir, validar_aviso,
+)
 
 
 def problema(modelo, mercado, severidad):
@@ -57,9 +59,12 @@ assert aplicar_subidas(r, "S035") == [{"caso_id": "C004", "cambio": "escalado", 
 procesar_snapshot(r, "S036", []); procesar_snapshot(r, "S037", [])
 assert brasil["estado"] == "escalado" and brasil["severidad_actual"] == "critica"
 assert sedan["estado"] == "resuelto"  # el Sedán no tenía subida: se resolvió
+# pero el informe lo marca: los números ya no muestran atraso y ninguna bitácora dijo que se resolvió
+assert falta_confirmar(r, brasil) == 2 and falta_confirmar(r, sedan) == 0
 
 # levantada la subida, rige otra vez la severidad del código y se resuelve con dos fotos sin problema
 levantar(r["subidas"][0], "T19", "volvió a las 10:00", "S038")
+assert falta_confirmar(r, brasil) == 0  # ya no hay nada que confirmar
 procesar_snapshot(r, "S039", []); procesar_snapshot(r, "S040", [])
 assert brasil["estado"] == "resuelto" and brasil["resuelto_en"] == "S040"
 
@@ -78,5 +83,21 @@ assert novedades() == [("C002", "en_seguimiento", "media")]      # caso nuevo
 procesar_snapshot(r, "S023", loc("alta")); procesar_snapshot(r, "S024", loc("media"))
 assert novedades() == [("C002", "en_seguimiento", "alta")]       # pico alta que bajó a media antes del cierre
 assert [c["caso_id"] for c in cerrar_turno(r)[1]] == ["C002"]     # casos activos: solo C002
+
+# avisos estructurados (guía, sección 4): se arman desde el cuaderno y se validan antes de guardarlos
+r = nuevo()
+procesar_snapshot(r, "S001", [{"modelo": "Pickup", "mercado": "Brasil", "severidad_final": "critica", "etapa_donde_se_traban": "montaje"}])
+caso = r["casos"][0]
+caso["causa"] = {"categoria": "parada_de_linea", "etapa": "montaje", "bitacora": "T17", "fragmento": "se paró la línea"}
+a = aviso(r, caso, "S001", "alerta_inmediata", "Pickup para Brasil pasó a crítica")
+assert validar_aviso(a) == [] and a["origen"] == "umbral"
+assert a["evidencia"] == [{"bitacora": "T17", "fragmento": "se paró la línea"}]
+assert any("escalado y crítico" in e for e in validar_aviso({**a, "severidad": "media"}))    # una alerta es de un caso crítico
+assert any("no tiene texto" in e for e in validar_aviso({**a, "texto": " "}))
+assert any("trae la cita" in e for e in validar_aviso({**a, "origen": "agente", "evidencia": []}))
+assert any("tipo inválido" in e for e in validar_aviso({**a, "tipo": "mail"}))
+assert any("evidencia" in e for e in validar_aviso({**a, "evidencia": [{"bitacora": "X", "fragmento": ""}]}))
+informe = aviso(r, caso, "S002", "informe_de_turno")
+assert validar_aviso(informe) == [] and "texto" not in informe   # una novedad del informe no lleva texto propio
 
 print("ok")

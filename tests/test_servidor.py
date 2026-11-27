@@ -22,6 +22,11 @@ async def probar():
             "procesar_snapshot", "registrar_alerta", "registrar_informe", "leer_bitacora", "registrar_causa",
             "subir_severidad", "levantar_subida"}
 
+        # el criterio de cada agente lo publica el servidor como prompt MCP (Semana 4)
+        assert {p.name for p in await c.list_prompts()} == {"criterio_coordinador", "criterio_lector", "criterio_redactor"}
+        lector = (await c.get_prompt("criterio_lector")).messages[0].content.text
+        assert "sin_fecha" in lector and "no_declarada" in lector
+
         # antes de la primera foto no hay ninguna bitácora escrita
         assert (await llamar("leer_bitacora", turno_id="T01")).is_error
 
@@ -84,6 +89,17 @@ async def probar():
         # avisos válidos
         assert not (await llamar("registrar_alerta", snapshot_id="S016", caso_id="C001", texto="crítica")).is_error
         assert not (await llamar("registrar_informe", snapshot_id="S016", texto="informe T08")).is_error
+
+        # se guardan estructurados (Semana 5): los campos salen del cuaderno, no del texto
+        alerta = registro.cargar()["alertas"][-1]
+        assert {k: alerta[k] for k in ("snapshot_id", "caso_id", "modelo", "mercado", "tipo", "severidad", "estado", "origen")} == {
+            "snapshot_id": "S016", "caso_id": "C001", "modelo": "SUV", "mercado": "Europa", "tipo": "alerta_inmediata",
+            "severidad": "critica", "estado": "escalado", "origen": "umbral"}
+        assert alerta["texto"] == "crítica" and alerta["causa"] == {"categoria": "retencion_de_calidad", "etapa": "calidad"}
+        assert alerta["evidencia"] == [{"bitacora": "T07", "fragmento": cita_con_saltos}]  # la cita de la causa
+        informe = registro.cargar()["informes"][-1]
+        assert informe["turno_id"] == "T08" and [n["caso_id"] for n in informe["novedades"]] == ["C001"]
+        assert informe["novedades"][0]["tipo"] == "informe_de_turno" and informe["casos_activos"][0]["caso_id"] == "C001"
 
         # lo que las tools rechazan
         assert (await llamar("procesar_snapshot", snapshot_id="S099")).is_error                          # foto que no existe
@@ -157,7 +173,12 @@ async def probar_subida():
         # el informe de S034 confirma las novedades con lo que escaló en esta misma foto
         await llamar("registrar_informe", snapshot_id="S034", texto="informe T17")
         informe = registro.cargar()["informes"][-1]
-        assert informe["novedades"] == ["C001", "C002"]
+        assert [n["caso_id"] for n in informe["novedades"]] == ["C001", "C002"]
+        # una alerta por la bitácora trae la cita de la causa y la de la subida como evidencia
+        assert not (await llamar("registrar_alerta", snapshot_id="S034", caso_id="C001", texto="Pickup crítica")).is_error
+        alerta = registro.cargar()["alertas"][-1]
+        assert alerta["origen"] == "agente" and [e["bitacora"] for e in alerta["evidencia"]] == ["T17", "T17"]
+        assert alerta["evidencia"][1]["fragmento"] == sin_fecha
         assert registro.buscar_caso(registro.cargar(), "C001")["ultimo_informe"] == {"estado": "escalado", "severidad": "critica"}
 
         # S035: se abre Pickup/Europa; al recibir la misma causa, escala por la subida vigente

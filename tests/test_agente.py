@@ -1,5 +1,5 @@
-"""Pruebas de agente.py sin usar la API: lo que puede usar cada agente y los mensajes que arma el código
-para el lector y el redactor. Usan un cuaderno temporal, no tocan salidas/registro.json.
+"""Pruebas de agente.py sin usar la API: lo que puede usar cada agente, los hooks del loop y los mensajes que arma
+el código para el lector y el redactor. Usan un cuaderno temporal, no tocan salidas/registro.json.
 Correr con: python tests/test_agente.py"""
 import asyncio
 import json
@@ -25,7 +25,8 @@ def pedido(nombre, **datos):
 
 async def probar_permisos():
     async with Client(mcp) as c:
-        agentes = agente.Agentes(None, c, await c.list_tools())  # sin cliente de la API: nada llega a Haiku
+        # sin cliente de la API: nada llega a Haiku. El criterio de cada agente se lo pide al servidor MCP
+        agentes = agente.Agentes(None, c, await c.list_tools(), await agente.leer_criterios(c))
 
         # cada agente recibe solo sus tools
         nombres = {a: [t["name"] for t in tools] for a, tools in agentes.tools.items()}
@@ -63,6 +64,78 @@ async def probar_permisos():
         registro.guardar(evaluador.agente_perfecto(16))  # en S016 sí escaló, pero su alerta ya está anotada
         texto, es_error = await agentes.ejecutar("coordinador", pedido("pedir_texto", tipo="alerta", caso_id="C004"))
         assert es_error and "ya está registrada" in texto
+
+
+async def probar_hooks():
+    async with Client(mcp) as c:
+        agentes = agente.Agentes(None, c, await c.list_tools(), await agente.leer_criterios(c))
+        # el criterio llega desde el servidor MCP, como prompt
+        assert "Sos el coordinador" in agentes.criterios["coordinador"] and "sin_fecha" in agentes.criterios["lector"]
+        alerta = lambda **d: agentes.ejecutar("coordinador", pedido("registrar_alerta", **d))
+        informe = lambda **d: agentes.ejecutar("coordinador", pedido("registrar_informe", **d))
+
+        # S016: C004 SUV/Europa escaló por los números y todavía no tiene alerta ni informe
+        cuaderno = evaluador.agente_perfecto(16)
+        cuaderno["alertas"] = [a for a in cuaderno["alertas"] if a["snapshot_id"] != "S016"]
+        cuaderno["informes"] = [i for i in cuaderno["informes"] if i["snapshot_id"] != "S016"]
+        registro.guardar(cuaderno)
+        agentes.nueva_foto("S016")
+
+        # al terminar: no lo deja terminar sin la alerta ni sin el informe del cierre
+        assert "no tienen alerta: C004" in agentes.al_terminar()
+
+        # hook_alerta: fuera de la foto que llegó, y después repetida
+        texto, es_error = await alerta(snapshot_id="S015", caso_id="C004", texto="x")
+        assert es_error and "foto que llegó (S016)" in texto
+        texto, es_error = await alerta(snapshot_id="S016", caso_id="C004", texto="ALERTA · C004 SUV/Europa pasó a crítica")
+        assert not es_error  # pasa los hooks y el servidor la valida y la guarda estructurada
+        texto, es_error = await alerta(snapshot_id="S016", caso_id="C004", texto="otra vez")
+        assert es_error and "Aviso repetido: C004 ya tuvo su alerta en S016" in texto
+
+        # al terminar: ahora falta el informe
+        assert "falta el informe" in agentes.al_terminar()
+
+        # hook_informe: le falta un caso activo; después, completo; después, repetido
+        novedades, activos = registro.cerrar_turno(registro.cargar(), confirmar=False)
+        todos = " ".join(dict.fromkeys(x["caso_id"] for x in novedades + activos))
+        texto, es_error = await informe(snapshot_id="S016", texto="Informe sin casos")
+        assert es_error and "C004" in texto and "Al informe le faltan" in texto
+        texto, es_error = await informe(snapshot_id="S016", texto=f"Informe T08: {todos}")
+        assert not es_error
+        texto, es_error = await informe(snapshot_id="S016", texto=f"Informe T08: {todos}")
+        assert es_error and "ya está registrado" in texto
+        assert agentes.al_terminar() is None  # ya no falta nada
+
+        # hook_alerta: una severidad menor que crítica no lleva alerta
+        cuaderno = evaluador.agente_perfecto(17)  # C005 SUV/Local se abre en S017 con severidad media
+        c005 = registro.buscar_caso(cuaderno, "C005")
+        c005["alerta_enviada_en"] = "S017"  # como si el modelo creyera que escaló
+        registro.guardar(cuaderno)
+        texto, es_error = await alerta(snapshot_id="S017", caso_id="C005", texto="x")
+        assert es_error and "la alerta es solo para un caso crítico" in texto and "media" in texto
+
+        # al terminar: la foto que llegó no se procesó
+        agentes.nueva_foto("S018")
+        assert "No procesaste la foto S018" in agentes.al_terminar()
+
+        # una foto repetida no pide alerta ni informe de nuevo
+        agentes.nueva_foto("S016")
+        agentes.foto["repetida"] = True
+        registro.guardar(evaluador.agente_perfecto(16) | {"alertas": [], "informes": []})
+        assert agentes.al_terminar() is None
+
+        # el hook de después anota cada tool usada en la foto
+        assert agentes.foto["tools"] == [] and len([t for t in agentes.foto["tools"]]) == 0
+        await agentes.ejecutar("coordinador", pedido("procesar_snapshot", snapshot_id="S016"))
+        assert agentes.foto["tools"][-1] == {"agente": "coordinador", "tool": "procesar_snapshot", "error": False}
+
+
+def probar_esquema_lector():
+    # la salida estructurada del lector: todos los campos obligatorios y sin campos de más
+    e = agente.ESQUEMA_LECTOR
+    assert set(e["required"]) == set(e["properties"]) and e["additionalProperties"] is False
+    assert "no_declarada" in e["properties"]["categoria"]["enum"]
+    assert e["properties"]["estado"]["enum"] == ["sin_fecha", "con_fecha", "resuelta", "no_dice"]
 
 
 def probar_mensajes():
@@ -104,5 +177,7 @@ def probar_mensajes():
 
 
 asyncio.run(probar_permisos())
+asyncio.run(probar_hooks())
+probar_esquema_lector()
 probar_mensajes()
 print("ok")

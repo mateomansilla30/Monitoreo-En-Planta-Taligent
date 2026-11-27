@@ -1,13 +1,16 @@
 import copy
 import json
 import os
+import re
 from pathlib import Path
 
 from calculo import SEVERIDADES
 
 # Las pruebas la cambian por una temporal; la demo en vivo usa otra (variable REGISTRO), así no pisa la última corrida.
-# El servidor MCP corre en otro proceso, pero hereda la variable: los dos usan el mismo cuaderno.
+# El servidor MCP corre en otro proceso: agente.py le pasa la variable, así los dos usan el mismo cuaderno.
 RUTA = Path(os.environ.get("REGISTRO") or Path(__file__).resolve().parent.parent / "salidas" / "registro.json")
+
+FOTOS_PARA_RESOLVER = 2  # fotos seguidas sin desvío para dar un caso por resuelto (umbrales.yaml: resolucion)
 
 
 def nuevo():
@@ -74,6 +77,7 @@ def procesar_snapshot(registro, snapshot_id, problemas):
             severidad, origen = "critica", "agente"  # la severidad del código es un piso: la subida la lleva a crítica
         anotar_severidad(caso, severidad)
         caso["fotos_seguidas_sin_problema"] = 0
+        caso["sin_atraso_con_subida"] = 0
         if severidad == "critica" and caso["estado"] != "escalado":
             escalar(caso, snapshot_id, origen, cambios)
 
@@ -82,18 +86,28 @@ def procesar_snapshot(registro, snapshot_id, problemas):
         if caso["estado"] == "abierto":
             caso["estado"] = "en_seguimiento"
         if subida_vigente(registro, caso):
-            # con una subida vigente sigue habiendo desvío: no cuenta para resolverse (criterio.md §3)
+            # con una subida vigente sigue habiendo desvío: no cuenta para resolverse (criterio.md §3).
+            # Igual se cuenta cuántas fotos van sin atraso en los números, para que el informe pida confirmarlo.
             anotar_severidad(caso, "critica")
             caso["fotos_seguidas_sin_problema"] = 0
+            caso["sin_atraso_con_subida"] = caso.get("sin_atraso_con_subida", 0) + 1
             continue
         anotar_severidad(caso, "ninguna")
         caso["fotos_seguidas_sin_problema"] += 1
-        if caso["fotos_seguidas_sin_problema"] == 2:
+        if caso["fotos_seguidas_sin_problema"] == FOTOS_PARA_RESOLVER:
             caso["estado"] = "resuelto"
             caso["resuelto_en"] = snapshot_id
             cambios.append({"caso_id": caso["caso_id"], "cambio": "resuelto"})
 
     return cambios
+
+
+def falta_confirmar(registro, caso):
+    """Cuántas fotos seguidas van sin atraso en los números mientras la subida sigue vigente, desde las que alcanzarían
+    para resolver el caso; si no, 0. La subida no la levantan los números (criterio.md §5: solo una bitácora que diga que
+    se resolvió), pero el informe lo marca para que alguien lo confirme y el caso no quede en crítica sin que nadie lo note."""
+    n = caso.get("sin_atraso_con_subida", 0)
+    return n if n >= FOTOS_PARA_RESOLVER and subida_vigente(registro, caso) else 0
 
 
 def subida_vigente(registro, caso):
@@ -134,6 +148,71 @@ def subir(registro, caso, bitacora, fragmento, snapshot_id):
 def levantar(subida, bitacora, fragmento, snapshot_id):
     """Una bitácora posterior dice que la causa se resolvió: desde acá rige otra vez la severidad del código."""
     subida.update(levantada_en=snapshot_id, bitacora_fin=bitacora, fragmento_fin=fragmento)
+
+
+TIPOS_AVISO = ("alerta_inmediata", "informe_de_turno")
+ESTADOS = ("abierto", "en_seguimiento", "escalado", "resuelto")
+
+
+def evidencia_de(registro, caso):
+    """Las citas que respaldan un aviso: la de la causa y, si la severidad está subida, la de la subida."""
+    evidencia = []
+    causa = caso.get("causa")
+    if causa and causa.get("bitacora"):
+        evidencia.append({"bitacora": causa["bitacora"], "fragmento": causa["fragmento"]})
+    subida = subida_vigente(registro, caso)
+    if subida:
+        evidencia.append({"bitacora": subida["bitacora"], "fragmento": subida["fragmento"]})
+    return evidencia
+
+
+def aviso(registro, caso, snapshot_id, tipo, texto=None):
+    """Un aviso con la forma que sugiere la guía (sección 4): qué caso, en qué foto, por qué escaló y con qué evidencia.
+    Los campos salen del cuaderno, no del texto que escribió el modelo."""
+    causa = caso.get("causa")
+    resultado = {
+        "snapshot_id": snapshot_id, "caso_id": caso["caso_id"], "modelo": caso["modelo"], "mercado": caso["mercado"],
+        "tipo": tipo, "severidad": caso["severidad_actual"], "estado": caso["estado"],
+        "origen": caso.get("escalado_por"),  # 'umbral' (los números) o 'agente' (la bitácora); None si no escaló
+        "causa": {"categoria": causa["categoria"], "etapa": causa["etapa"]} if causa else None,
+        "evidencia": evidencia_de(registro, caso),
+    }
+    if texto is not None:
+        resultado["texto"] = texto
+    return resultado
+
+
+def validar_aviso(a):
+    """Los errores de forma de un aviso (lista vacía si está bien). Una alerta tiene reglas extra:
+    es de un caso escalado y crítico, dice por qué escaló, y si escaló por la bitácora trae la cita."""
+    errores = []
+    if not re.fullmatch(r"S\d{3}", str(a.get("snapshot_id"))):
+        errores.append("snapshot_id inválido")
+    if a.get("tipo") not in TIPOS_AVISO:
+        errores.append(f"tipo inválido: {a.get('tipo')}")
+    if a.get("severidad") not in SEVERIDADES:
+        errores.append(f"severidad inválida: {a.get('severidad')}")
+    if a.get("estado") not in ESTADOS:
+        errores.append(f"estado inválido: {a.get('estado')}")
+    if a.get("origen") not in (None, "umbral", "agente"):
+        errores.append(f"origen inválido: {a.get('origen')}")
+    causa = a.get("causa")
+    if causa is not None and not (isinstance(causa, dict) and causa.get("categoria")):
+        errores.append("causa sin categoría")
+    for e in a.get("evidencia", []):
+        if not re.fullmatch(r"T\d{2}", str(e.get("bitacora"))) or not e.get("fragmento"):
+            errores.append("evidencia sin bitácora o sin fragmento")
+    if a.get("tipo") == "alerta_inmediata":
+        if a.get("severidad") != "critica" or a.get("estado") != "escalado":
+            errores.append(f"una alerta es de un caso escalado y crítico, y {a.get('caso_id')} está {a.get('estado')} "
+                           f"con severidad {a.get('severidad')}")
+        if a.get("origen") is None:
+            errores.append("la alerta no dice por qué escaló el caso")
+        if a.get("origen") == "agente" and not a.get("evidencia"):
+            errores.append("escaló por la bitácora pero no trae la cita")
+        if not str(a.get("texto", "")).strip():
+            errores.append("la alerta no tiene texto")
+    return errores
 
 
 def cerrar_turno(registro, confirmar=True):
