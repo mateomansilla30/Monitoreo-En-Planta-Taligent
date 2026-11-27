@@ -37,8 +37,8 @@ Las seis tienen que imprimir `ok`. Las líneas de `ERROR` que aparecen antes son
 | 1 · Cálculo, agente con MCP, registro fuera del modelo, evaluador | Completa |
 | 2 · Causa citada de la bitácora y subida de severidad | Completa y probada con Haiku |
 | 3 · Varios agentes, con costo | Completa: coordinador, lector y redactor, con el costo de cada uno |
-| 4 · Hooks, criterio como prompt MCP, permisos por agente | Los permisos por agente, en el código. Faltan hooks y criterio como prompt |
-| 5 · Salida estructurada, caché, idempotencia, días 8 a 10 | La idempotencia (la foto repetida S034) y los días 8 a 10 |
+| 4 · Hooks, criterio como prompt MCP, permisos por agente | Completa: hooks antes de cada tool, después y al terminar; el criterio de cada agente es un prompt del servidor MCP |
+| 5 · Salida estructurada, caché, idempotencia, días 8 a 10 | Completa: avisos estructurados y validados, salida estructurada del lector, caché (verificado con `cache_read_input_tokens`), Batch API evaluada en el README |
 | 6 · Serie completa con un comando, costo y tiempo | Completa: las 61 llegadas con `python src/agente.py` |
 | 7 · Demo Day | El front está hecho (`front/` + `python src/demo.py`, ver el README). Falta ensayar |
 
@@ -80,8 +80,8 @@ Las seis tienen que imprimir `ok`. Las líneas de `ERROR` que aparecen antes son
    - En la parte 4, correr "Hasta S036" (unos 6 minutos y USD 0,12). Conviene arrancarla al principio y seguir con las partes 1 a 3 mientras corre.
    - La traza de la alerta de Pickup/Brasil en S034 está en la parte 5: sale 8 horas antes de que los números lleguen a crítica, por la bitácora T17.
    - Si la API falla en vivo, las partes 5 a 7 salen de la corrida guardada y no necesitan la API.
-2. **Semana 4:** hooks en el loop y el criterio como prompt MCP.
-3. **Semana 5:** salida estructurada y caché de prompts para el coordinador, que es lo que más bajaría el costo.
+2. **Corrida completa de los 10 días** con los hooks, la salida estructurada y el caché, para actualizar los resultados y el costo del README.
+3. **Evaluador:** medir el ruido de los informes (novedades que repiten algo ya informado).
 
 ## Problemas conocidos (chicos)
 

@@ -50,20 +50,27 @@ Después, para presentar, un solo comando:
 python src/demo.py        # abre http://127.0.0.1:8765
 ```
 
-Tiene siete partes, una idea por pantalla. Se pasa de una a otra con las flechas ← →, Re Pág / Av Pág (el puntero de presentación) o los números 1 a 7. Las flechas ↑ ↓ bajan y suben dentro de una parte:
+Tiene seis partes, una idea por pantalla. Se pasa de una a otra con las flechas ← →, Re Pág / Av Pág (el puntero de presentación) o los números 1 a 6. Las flechas ↑ ↓ bajan y suben dentro de una parte:
 
-1. **El problema:** la planta y sus etapas, la información que hay, qué es un atraso (con dos ejemplos reales), cómo se sigue un caso, qué hay que avisar y por qué es difícil.
-2. **Qué resuelve:** los tres tipos de aviso y las 60 fotos de los 10 días pintadas según la severidad que calcula el código, con las alertas marcadas.
-3. **Cómo funciona:** los tres agentes, qué hace el código y qué el modelo, y las tools de cada agente.
-4. **En vivo:** el botón para correr el agente hasta S016, S036, S038 o los 10 días. Se ve:
+1. **El problema,** en 12 escenas que se pasan con ↓ ↑ o con el índice de la izquierda (se cierra para dejar más lugar):
+   - la planta funcionando, y lo que hoy hace a mano una persona de control de producción, cada 4 horas;
+   - la línea: un auto entra a cada estación y sale cambiado, hasta que se va en camión o buque;
+   - el plan por turno y qué trae cada foto;
+   - las dos preguntas (¿faltan autos?, ¿llega a su embarque?) con ejemplos reales;
+   - cómo dan una severidad (interactiva: se mueven los números y se ve la severidad);
+   - la vida de un caso;
+   - de dónde sale la causa y cuándo la bitácora sube la severidad;
+   - qué hay que decidir y qué se avisa.
+2. **Cómo funciona:** los tres agentes, qué hace el código y qué el modelo, y las tools de cada agente.
+3. **En vivo:** el botón para correr el agente hasta S016, S036, S038 o los 10 días. Se ve:
    - la planta foto por foto;
    - lo que hace cada agente;
    - lo que rechaza el código;
    - el costo;
    - cada alerta cuando sale.
-5. **Traza:** en qué foto salió una alerta, por qué escaló y la frase de la bitácora que la respalda. Arranca en la de Pickup/Brasil en S034, 8 horas antes de que los números llegaran a crítica (S036).
-6. **Resultados:** la nota del evaluador, el costo de uno contra tres agentes, la causa que falla (C006) y los días 8 a 10.
-7. **Avisos:** las alertas y los informes completos, para las preguntas.
+4. **Traza:** en qué foto salió una alerta, por qué escaló y la frase de la bitácora que la respalda. Arranca en la de Pickup/Brasil en S034, 8 horas antes de que los números llegaran a crítica (S036).
+5. **Resultados:** la nota del evaluador, el costo de uno contra tres agentes, el caché, y las 60 fotos de los 10 días pintadas según la severidad que calcula el código, con las 5 alertas marcadas y de dónde salió cada una.
+6. **Avisos:** las alertas y los informes completos, para las preguntas.
 
 **De dónde sale cada parte:**
 - La corrida en vivo usa su propio cuaderno, en `salidas/demo/`, así no pisa la de los 10 días.
@@ -81,7 +88,7 @@ python tests/test_calculo.py      # las cuentas, con ejemplos verificados a mano
 python tests/test_registro.py     # el ciclo de un caso y las novedades del informe
 python tests/test_servidor.py     # las tools: lo que devuelven y lo que rechazan
 python tests/test_evaluador.py    # que el evaluador encuentre los errores de un agente
-python tests/test_agente.py       # lo que puede usar cada agente y los datos que les arma el código
+python tests/test_agente.py       # lo que puede usar cada agente, los hooks y los datos que les arma el código
 python tests/test_demo.py         # los eventos de la corrida en vivo que lee el front
 ```
 
@@ -122,7 +129,7 @@ evaluador.py → compara lo que avisó Haiku con lo que tendría que haber avisa
 | `registrar_causa(caso_id, categoria, etapa, bitacora, fragmento)` | Cuando encontró la causa, o `no_declarada` si ninguna bitácora la nombra. | Una cita que no está en la bitácora, una bitácora del futuro, una `no_declarada` con cita o con una etapa distinta de la que muestran los datos. |
 | `subir_severidad(caso_id, bitacora, fragmento)` | Cuando la bitácora dice que la causa sigue sin fecha de resolución. | Un caso sin causa, una cita inventada, una causa ya subida. |
 | `levantar_subida(caso_id, bitacora, fragmento)` | Cuando una bitácora posterior dice que la causa se resolvió. | Un caso sin subida vigente, una cita inventada. |
-| `registrar_alerta(snapshot_id, caso_id, texto)` | Cuando un caso se escala. | Una foto no procesada o un caso que no existe. |
+| `registrar_alerta(snapshot_id, caso_id, texto)` | Cuando un caso se escala. | Una foto no procesada, un caso que no existe, o una alerta que no pasa la validación (un caso que no está escalado y crítico, o que escaló por la bitácora sin cita). |
 | `registrar_informe(snapshot_id, texto)` | En la última foto del turno. | Una foto no procesada o que no es cierre. |
 
 ## Varios agentes
@@ -160,6 +167,30 @@ coordinador  registrar_alerta(S034, C009, …)
 
 **Cada agente tiene su costo.** Al final de cada corrida se imprime cuántas veces se armó cada agente y cuánto gastó (ver "Resultados").
 
+## Semanas 4 y 5: criterio por MCP, hooks, avisos estructurados y caché
+
+**El criterio le llega a cada agente como prompt del servidor MCP.** `servidor_mcp.py` publica tres prompts: `criterio_coordinador`, `criterio_lector` y `criterio_redactor`. Al arrancar, `agente.py` se los pide al servidor (`leer_criterios`) y los usa como instrucciones de cada agente. Así las reglas viven en el servidor, junto a las tools que las aplican.
+
+**Hooks en el loop.** Son funciones en `agente.py` que corren en tres momentos. Las que frenan devuelven un motivo, y el modelo lo recibe como error de la tool.
+
+| Momento | Hook | Qué frena |
+|---|---|---|
+| Antes de cada tool | `hook_permisos` | Una tool que no está en la lista del agente. |
+| Antes de cada tool | `hook_alerta` | Una alerta repetida (el caso ya tuvo la suya), fuera de la foto en que el caso escaló, o de un caso con una severidad menor que crítica o que la mínima que calcula el código. |
+| Antes de cada tool | `hook_informe` | Un informe repetido, o al que le falta nombrar una novedad o un caso activo. |
+| Después de cada tool | `hook_despues` | No frena: anota qué tools se usaron en la foto y si la foto llegó repetida. |
+| Al terminar la foto | `hook_falta_procesar`, `hook_faltan_alertas`, `hook_falta_informe` | Que el coordinador termine sin haber procesado la foto, con un caso escalado sin alerta, o en un cierre de turno sin informe. Le dice qué falta y el loop sigue (hasta 2 veces por foto). |
+
+En la terminal y en la demo en vivo, cada freno aparece como "hook ... frena ..." con su motivo. Las pruebas de cada hook están en `tests/test_agente.py`, sin usar la API.
+
+**Avisos estructurados y validados.** Cada alerta se guarda con la forma que sugiere la guía: `snapshot_id`, `caso_id`, `modelo`, `mercado`, `tipo`, `severidad`, `estado`, `origen` (`umbral` o `agente`), `causa` (categoría y etapa), `evidencia` (bitácora y fragmento de cada cita) y `texto`. Los campos los completa el código desde el cuaderno (`registro.aviso`); el modelo solo escribe el texto. Antes de guardarla, `registro.validar_aviso` revisa la forma y las reglas de una alerta: tiene que ser de un caso escalado y crítico, decir por qué escaló y, si escaló por la bitácora, traer la cita. Cada informe guarda sus novedades como avisos con la misma forma, más la severidad máxima del turno y cómo estaba el caso en el informe anterior.
+
+La respuesta del lector también es salida estructurada: la API recibe un esquema JSON (`ESQUEMA_LECTOR`, con las categorías y los estados posibles) y garantiza que la respuesta tenga esa forma.
+
+**Caché.** En cada vuelta, cada agente manda las mismas tools y el mismo prompt. Una marca de caché en el prompt de sistema cachea las dos cosas, y la marca automática del pedido cachea además la conversación, que crece en cada vuelta. En Haiku 5.5, leer del caché cuesta 0,1 del precio de entrada y escribirlo 1,25. El costo de cada corrida cuenta los tokens leídos y escritos en el caché (`cache_read_input_tokens`, `cache_creation_input_tokens`). En la corrida de prueba hasta S016, de unos 353.000 tokens de entrada, 315.878 se leyeron del caché y solo 216 se pagaron completos: costó USD 0,019, contra unos USD 0,05 sin caché.
+
+**Batch API: no encaja en la serie.** La Batch API procesa pedidos independientes a mitad de precio, pero puede tardar hasta 24 horas en devolverlos. La serie no son pedidos independientes: cada foto se procesa con el cuaderno que dejó la anterior, y un monitor tiene que avisar en el momento en que llega la foto. Encajaría para correr evaluaciones que no dependen entre sí, por ejemplo hacerle al lector las mismas preguntas difíciles varias veces para medir cuánto acierta.
+
 ## Decisiones de diseño
 
 **Lo que tiene reglas fijas lo hace el código; el modelo decide qué tool usar y redacta.** Las cuentas, el ciclo de un caso y qué es novedad están escritos como reglas en `criterio.md`, así que los aplica el código: da siempre el mismo resultado y se puede probar. Haiku es un modelo chico y barato, y solo hace lo que necesita leer o escribir texto: redactar los avisos y, desde la Semana 2, leer las bitácoras.
@@ -191,36 +222,40 @@ coordinador  registrar_alerta(S034, C009, …)
 
 ## Resultados
 
-Las 61 llegadas (10 días, S034 llega dos veces), en dos corridas: la del 19/11 con un solo agente, que fue la prueba a ciegas de los días 8 a 10, y la del 23/11 con los tres agentes.
+Las 61 llegadas (10 días, S034 llega dos veces), en tres corridas: la del 19/11 con un solo agente, que fue la prueba a ciegas de los días 8 a 10; la del 23/11 con los tres agentes, sin caché; y la del 25/11 con los tres agentes, el caché, los hooks y los avisos estructurados, que es la que muestra la demo.
 
-| | Un agente (19/11) | Tres agentes (23/11) |
-|---|---|---|
-| Fotos | 60 de 60 | 60 de 60 |
-| Alertas | 5 de 5 | 5 de 5 |
-| Informes | 30 de 30 | 30 de 30 |
-| Causas | 16 de 17 | 16 de 17 |
-| Subida de severidad | 1 de 1 | 1 de 1 |
-| Tiempo | 5,4 min | 9,9 min |
-| Tokens | 1.071.374 de entrada y 55.088 de salida | 1.556.561 de entrada y 107.992 de salida |
-| Costo | **USD 0,13** | **USD 0,21** |
+| | Un agente (19/11) | Tres agentes, sin caché (23/11) | Tres agentes, con caché y hooks (25/11) |
+|---|---|---|---|
+| Fotos | 60 de 60 | 60 de 60 | 60 de 60 |
+| Alertas | 5 de 5 | 5 de 5 | 5 de 5 |
+| Informes | 30 de 30 | 30 de 30 | 30 de 30 |
+| Causas | 16 de 17 | 16 de 17 | 16 de 17 |
+| Subida de severidad | 1 de 1 | 1 de 1 | 1 de 1 |
+| Tiempo | 5,4 min | 9,9 min | 10,2 min |
+| Tokens | 1.071.374 de entrada y 55.088 de salida | 1.556.561 de entrada y 107.992 de salida | 942 de entrada, 1.460.459 leídos del caché, 146.385 escritos en el caché y 107.783 de salida |
+| Costo | **USD 0,13** | **USD 0,21** | **USD 0,087** |
 
 - **Total:** 17 casos, 5 alertas, 30 informes (10 sin novedades). La foto repetida S034 se procesó una sola vez.
-- **Las alertas, en las dos corridas:**
+- **Las alertas, en las tres corridas:**
   - SUV/Europa en S016, por los números.
   - Pickup Brasil y Local en S034 y Pickup Europa en S035, por la bitácora T17 ("por ahora no hay fecha confirmada de vuelta"). Salieron antes de que los números los volvieran críticos, en S036. La subida se levanta en S038 por T19 ("la línea de montaje de Pickup volvió a las 10:00").
   - SUV/Local en S058, por los números (faltan neumáticos).
 - **Los días 8 a 10, nunca vistos, con un agente:** 18 de 18 fotos, 1 de 1 alerta, 9 de 9 informes y 6 de 6 causas. No subió ninguna severidad, y era lo correcto: los neumáticos tienen fecha de entrega y la parada de SUV "Quedó reparada".
-- **La causa que falla es C006 SUV/Brasil.** La bitácora T09 habla del repintado de "SUV" sin decir el mercado, y cuando se abre el caso (S019) los datos ya no muestran etapa cuello. Haiku pone `no_declarada`. La tabla a mano dice `retrabajo` porque en S017–S018 había SUV para Brasil en repintado. Con tres agentes salió bien en 1 de 3 corridas: depende de si el lector une el repintado de T09 con este caso.
+- **La causa que falla es C006 SUV/Brasil.** La bitácora T09 habla del repintado de "SUV" sin decir el mercado, y cuando se abre el caso (S019) los datos ya no muestran etapa cuello. Haiku pone `no_declarada`. La tabla a mano dice `retrabajo` porque en S017–S018 había SUV para Brasil en repintado. Con tres agentes salió bien en 1 de 4 corridas: depende de si el lector une el repintado de T09 con este caso.
 
-**El costo de cada agente (23/11):**
+**El costo de cada agente:**
 
-| Agente | Veces que se armó | Costo |
-|---|---|---|
-| Coordinador | 61, una por llegada | USD 0,165 |
-| Lector | 37 | USD 0,025 |
-| Redactor | 35: 5 alertas y 30 informes | USD 0,020 |
+| Agente | Veces que se armó | Sin caché (23/11) | Con caché (25/11) |
+|---|---|---|---|
+| Coordinador | 61, una por llegada | USD 0,165 | USD 0,054 (62 %) |
+| Lector | 37 | USD 0,025 | USD 0,014 (17 %) |
+| Redactor | 35: 5 alertas y 30 informes | USD 0,020 | USD 0,019 (21 %) |
 
-**Por qué cuesta más con tres agentes.** Casi todo el aumento es del coordinador, que por cada aviso hace una vuelta más: pide el texto y después lo registra. Así, cada alerta e informe pasa dos veces por él. Entra como resultado de `pedir_texto` y sale copiado en `registrar_alerta` o `registrar_informe`, y los tokens de salida cuestan 5 veces más que los de entrada. Además, su prompt y sus 8 tools van de nuevo en cada vuelta. La palanca para bajarlo es el caché de prompts (Semana 5), porque esa parte es igual en todas las vueltas.
+**El caché en los 10 días.** Sin caché, la corrida del 25/11 habría costado USD 0,215; costó 0,087, un 60 % menos y con la misma nota. Se leyeron 1.460.459 tokens del caché y solo 942 se pagaron completos. Así, tres agentes cuestan menos que uno solo sin caché. El tiempo no baja (10,2 min): las vueltas son las mismas. Lo que pesa ahora es la salida, el 62 % del costo.
+
+**Los hooks en una corrida real.** En la del 25/11, en S017 el coordinador quiso mandar de nuevo la alerta de C004 y `hook_alerta` lo frenó ("Aviso repetido: C004 ya tuvo su alerta en S016"). Fue el único pedido frenado de la serie.
+
+**Por qué cuesta más con tres agentes.** Casi todo el aumento es del coordinador, que por cada aviso hace una vuelta más: pide el texto y después lo registra. Así, cada alerta e informe pasa dos veces por él. Entra como resultado de `pedir_texto` y sale copiado en `registrar_alerta` o `registrar_informe`, y los tokens de salida cuestan 5 veces más que los de entrada. Además, su prompt y sus 8 tools van de nuevo en cada vuelta. La palanca para bajarlo fue el caché de prompts, porque esa parte es igual en todas las vueltas.
 
 **Qué se gana con tres agentes, con la misma nota del evaluador:**
 - Los informes traen los números de cada caso activo, que el criterio pide en la tabla, y salen siempre con el mismo formato.
@@ -232,9 +267,8 @@ Las 61 llegadas (10 días, S034 llega dos veces), en dos corridas: la del 19/11 
 - Intenta subir o levantar la misma causa en cada Pickup, y la tool lo rechaza porque ya está hecho.
 - A veces nombra como novedad un caso que no cambió.
 
-Los registros completos quedan en `salidas/` (no están en git): `corrida_S042.txt` y `corrida_S060.txt` con un agente, y `multi_S060.txt` con tres. También están `multi_S020.txt` y `multi_S042.txt`, corridas con versiones intermedias; la de S042 dio los días 1 a 7 sin errores, con C006 bien, por USD 0,14.
+Los registros completos quedan en `salidas/` (no están en git): `corrida_S042.txt` y `corrida_S060.txt` con un agente, `multi_S060.txt` con tres sin caché, y `multi_cache_S060.txt` con tres, caché y hooks (su cuaderno es `salidas/registro.json`; el del 23/11 quedó en `salidas/corrida_23-11/`). También están `multi_S020.txt` y `multi_S042.txt`, corridas con versiones intermedias; la de S042 dio los días 1 a 7 sin errores, con C006 bien, por USD 0,14.
 
 ## Lo que falta
 
-- **Semanas 4 y 5:** hooks, criterio como prompt MCP, salida estructurada y caché (que bajaría el costo del coordinador). Los permisos por agente ya están.
 - **Evaluador:** todavía no revisa el texto de los avisos ni mide el ruido (novedades que repiten algo ya informado).
